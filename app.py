@@ -67,6 +67,9 @@ def read_report(path):
             return next((cols[n] for n in names if n in cols), None)
         title_i, pub_i = idx('기사제목', '제목'), idx('매체명', '보도매체')
         url_i, sum_i = idx('기사URL', 'URL'), idx('요약', '기사요약')
+        page_i = idx('지면', '지면정보', '면', '신문지면')
+        author_i = idx('기자명', '기자', '기자이름', '작성자')
+        date_i = idx('발행일', '기사날짜', '날짜', '일자', '작성일', '보도일', '등록일')
         if title_i is None or pub_i is None:
             raise ValueError("첫 행에 '기사 제목'과 '매체명' 열이 필요합니다.")
         def cell(row, i):
@@ -83,7 +86,11 @@ def read_report(path):
                 continue
             if current is None:
                 raise ValueError(f'{number}행 앞에 분야 구분 행이 없습니다.')
-            item = dict(title=title, publisher=cell(row,pub_i), url=cell(row,url_i), summary=cell(row,sum_i), row=number)
+            raw_date = row[date_i] if date_i is not None and date_i < len(row) else None
+            date = raw_date.strftime('%Y-%m-%d') if isinstance(raw_date, datetime) else cell(row, date_i)
+            item = dict(title=title, publisher=cell(row,pub_i), url=cell(row,url_i),
+                        summary=cell(row,sum_i), page=cell(row,page_i),
+                        author=cell(row,author_i), date=date, row=number)
             result[current].setdefault(group_key(title), []).append(item)
             count += 1
         return result, count
@@ -255,11 +262,34 @@ def excerpt(text, source):
 
 
 
-REPORT_STYLE = '\n    * {\n      box-sizing: border-box;\n    }\n\n    body {\n      margin: 0;\n      background: #f3f6fb;\n      color: #102b50;\n      font-family: Arial, "Malgun Gothic", sans-serif;\n      font-size: 13px;\n    }\n\n    .page {\n      width: min(100% - 32px, 735px);\n      margin: 16px auto 40px;\n    }\n\n    .upload-card,\n    .article-card {\n      background: #fff;\n      border: 1px solid #d5e1f0;\n      border-radius: 11px;\n    }\n\n    .upload-card {\n      padding: 17px 16px;\n    }\n\n    .upload-card h2 {\n      margin: 0 0 7px;\n      font-size: 13px;\n    }\n\n    .description,\n    .status {\n      margin: 0;\n      color: #6380a7;\n      font-size: 11px;\n      line-height: 1.6;\n    }\n\n    .upload-row {\n      display: flex;\n      gap: 8px;\n      margin: 13px 0 10px;\n    }\n\n    .upload-row input {\n      min-width: 0;\n      flex: 1;\n      padding: 8px;\n      border: 1px solid #c5d6ed;\n      border-radius: 6px;\n      background: #f9fbfe;\n    }\n\n    .upload-row button {\n      flex: none;\n      padding: 0 13px;\n      border: 0;\n      border-radius: 6px;\n      background: #245c9b;\n      color: #fff;\n      font-weight: 700;\n      cursor: pointer;\n    }\n\n    .upload-row button:disabled {\n      opacity: 0.6;\n      cursor: wait;\n    }\n\n    .report {\n      padding-top: 25px;\n    }\n\n    .report h1 {\n      margin: 0 0 25px;\n      font-size: 23px;\n    }\n\n    .category {\n      margin-bottom: 25px;\n    }\n\n    .category h2 {\n      margin: 0 0 13px;\n      padding-bottom: 11px;\n      border-bottom: 1px solid #b6cbe5;\n      color: #173d73;\n      font-size: 16px;\n    }\n\n    .article-card {\n      margin-bottom: 12px;\n      padding: 17px 18px 16px;\n    }\n\n    .article-card h3 {\n      margin: 0 0 14px;\n      font-size: 16px;\n      line-height: 1.5;\n    }\n\n    .article-card h3 a {\n      color: #102b50;\n      text-decoration: none;\n    }\n\n    .article-card h3 a:hover {\n      text-decoration: underline;\n    }\n\n    .headline-media {\n      margin-left: 8px;\n      color: #6380a7;\n      font-size: 11px;\n      font-weight: 400;\n      white-space: nowrap;\n    }\n\n    .media-line {\n      margin: 0 0 14px;\n      font-size: 11px;\n      line-height: 1.6;\n    }\n\n    .media-line strong {\n      color: #245c9b;\n    }\n\n    .summary {\n      margin: 0;\n      padding: 14px;\n      border-radius: 6px;\n      background: #f6f8fc;\n      font-size: 12px;\n      line-height: 1.75;\n      white-space: pre-wrap;\n      overflow-wrap: anywhere;\n    }\n\n    .summary.empty,\n    .empty-category {\n      color: #6380a7;\n    }\n\n    .empty-category {\n      margin: 0 4px;\n      font-size: 12px;\n    }\n\n    @media (max-width: 480px) {\n      .upload-row {\n        flex-direction: column;\n      }\n\n      .upload-row button {\n        min-height: 36px;\n      }\n\n      .headline-media {\n        white-space: normal;\n      }\n    }\n  \n    .report-note {font-size:11px;color:#6380a7;line-height:1.6;margin:0 0 22px;}\n'
+REPORT_STYLE = """
+:root {--primary:#1a365d;--accent:#2b6cb0;--bg:#f7fafc;--border:#e2e8f0;--text:#2d3748;--muted:#718096}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.6 'Malgun Gothic',-apple-system,BlinkMacSystemFont,sans-serif}
+.container{max-width:960px;margin:0 auto;padding:20px 16px 50px}
+header{background:var(--primary);color:white;border-radius:8px;padding:20px;margin-bottom:18px}
+h1{font-size:23px;margin:0}header p{margin:3px 0 0;font-size:12px;color:#dbeafe}
+.toolbar{display:flex;align-items:center;gap:12px;background:white;border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px}
+.toolbar p{margin:0;flex:1;color:#52647c}button{font:inherit;cursor:pointer;border:1px solid #b9c8da;border-radius:5px;background:white;color:var(--primary);padding:6px 11px}button:hover{background:#eff6ff}
+.category{margin:18px 0}.category-header{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--primary);margin:0 0 12px;padding:4px 0}
+h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#2563a4}
+.theme-group{border:1px solid var(--border);background:#fff;border-radius:9px;margin:10px 0;overflow:hidden}
+.theme-title{font-weight:700;background:#edf3f9;color:var(--primary);padding:10px 15px}
+.group-media{font-weight:400;font-size:11px;color:#62748c;margin-left:10px}
+.article{padding:11px 15px 14px;border-top:1px solid var(--border)}
+.article-title{font-weight:700;margin:0 0 5px}.article-title a{color:#172e4b;text-decoration:none}.article-title a:hover{text-decoration:underline}
+.article-meta{display:flex;gap:8px;flex-wrap:wrap;color:#607494;font-size:11px;margin-bottom:8px}.article-meta .media{color:#235e9d;font-weight:700}
+.summary{background:#f7fafc;border-left:3px solid #2b6cb0;border-radius:5px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7}
+.edit-controls{margin-top:5px}.edit-controls>summary{cursor:pointer;color:#1f5b9b;font-size:12px}.edit{padding:10px 0}.edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.edit label{display:block;color:#607494;font-size:11px}.edit input,.edit textarea{display:block;width:100%;padding:7px;border:1px solid #becddd;border-radius:4px;color:#203654;font:13px 'Malgun Gothic',sans-serif}
+.edit textarea{min-height:100px;resize:vertical;margin-top:3px}.edit .summary-label{margin:9px 0}.edit button{margin-top:5px}
+.empty{color:var(--muted);font-size:12px}.note{color:#607494;font-size:11px;margin:14px 0}footer{color:#607494;font-size:11px;margin-top:20px}
+@media(max-width:600px){.toolbar{flex-wrap:wrap}.edit-grid{grid-template-columns:1fr}.group-media{display:block;margin:2px 0 0}}
+@media print{body{background:white}.toolbar,.edit-controls{display:none!important}.theme-group{break-inside:avoid}header{print-color-adjust:exact}}
+"""
 
 
 def safe_report_url(value):
-    """Only public-looking HTTP(S) absolute URLs become clickable links; no network request here."""
+    """Only HTTP(S) URLs become clickable; content is escaped at the call site."""
     try:
         p = urlparse((value or '').strip())
         if p.scheme.lower() in ('https', 'http') and p.hostname and not p.username and not p.password:
@@ -269,53 +299,127 @@ def safe_report_url(value):
     return None
 
 
-def report_html(report_groups, summaries, generated_at=None):
-    """Offline, self-contained read-only snapshot matching the original report layout.
+REPORT_SCRIPT = r"""
+(function () {
+  'use strict';
+  const stateElement = document.getElementById('report-state');
+  const items = JSON.parse(stateElement.textContent);
+  const cards = Array.from(document.querySelectorAll('[data-card]'));
+  function apply(card) {
+    const index = Number(card.getAttribute('data-card'));
+    const data = items[index];
+    const editor = card.querySelector('.edit-controls');
+    ['page', 'author', 'date', 'summary'].forEach(function (field) {
+      const input = editor.querySelector('[data-field="' + field + '"]');
+      data[field] = input.value.trim();
+    });
+    card.querySelector('[data-summary]').textContent = data.summary || '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.';
+    ['page', 'author', 'date'].forEach(function (field) {
+      const span = card.querySelector('[data-meta="' + field + '"]');
+      span.textContent = data[field];
+      span.hidden = !data[field];
+    });
+    editor.open = false;
+  }
+  cards.forEach(function (card) {
+    card.querySelector('[data-apply]').addEventListener('click', function () {
+      apply(card);
+      document.getElementById('save-status').textContent = '수정이 화면에 반영되었습니다. 파일에도 남기려면 수정한 HTML 저장을 누르세요.';
+    });
+  });
+  document.getElementById('save-html').addEventListener('click', function () {
+    cards.forEach(function (card) {
+      if (card.querySelector('.edit-controls').open) apply(card);
+    });
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelector('#report-state').textContent = JSON.stringify(items).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+    clone.querySelectorAll('[data-card]').forEach(function (card, index) {
+      const data = items[index];
+      card.querySelector('[data-summary]').textContent = data.summary || '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.';
+      ['page', 'author', 'date'].forEach(function (field) {
+        const span = card.querySelector('[data-meta="' + field + '"]');
+        span.textContent = data[field];
+        span.hidden = !data[field];
+        card.querySelector('[data-field="' + field + '"]').setAttribute('value', data[field]);
+      });
+      card.querySelector('[data-field="summary"]').textContent = data.summary;
+      card.querySelector('.edit-controls').removeAttribute('open');
+    });
+    clone.querySelector('#save-status').textContent = '저장된 보고서입니다. 내용을 바꾼 뒤 다시 저장할 수 있습니다.';
+    const blob = new Blob(['<!DOCTYPE html>\n' + clone.outerHTML], {type:'text/html;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '중앙부처동향_수정본.html';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+    document.getElementById('save-status').textContent = '수정본을 다운로드했습니다. 브라우저 다운로드 목록에서 파일을 확인하세요.';
+  });
+}());
+"""
 
-    summaries maps (category, group_key) to the current on-screen text.
-    """
+
+def report_html(report_groups, summaries, generated_at=None):
+    """Offline editable report in the supplied grouped article-card style."""
     esc = lambda value: html.escape(str(value or ''), quote=True)
     now = generated_at or datetime.now().strftime('%Y-%m-%d %H:%M')
-    pieces = ['<!DOCTYPE html>', '<html lang="ko">', '<head>', '<meta charset="UTF-8">',
-              '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-              '<title>중앙부처동향</title>', '<style>', REPORT_STYLE, '</style>', '</head>',
-              '<body>', '<main class="page">', '<section class="report">',
-              '<h1>중앙부처동향</h1>',
-              '<p class="report-note">생성: '+esc(now)+' · EXE에서 저장한 결과입니다. 본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요.</p>',
-              '<div id="categories">']
-    for category in CATEGORIES:
-        pieces.extend(['<section class="category">', '<h2>'+esc(category)+'</h2>'])
-        groups=report_groups.get(category, {})
+    count = sum(len(articles) for cat in CATEGORIES for articles in report_groups.get(cat, {}).values())
+    cards = sum(len(report_groups.get(cat, {})) for cat in CATEGORIES)
+    pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
+              '<meta name="viewport" content="width=device-width, initial-scale=1">',
+              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE,
+              '</style></head><body><main class="container">',
+              '<header><h1>중앙부처동향</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
+              '<div class="toolbar"><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
+              '<p class="note">본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요. 지면·기자·날짜는 엑셀에 해당 열이 있을 때만 표시됩니다.</p>']
+    data = []
+    for cat in CATEGORIES:
+        groups = report_groups.get(cat, {})
+        pieces.extend(['<section class="category"><div class="category-header"><h2>',esc(cat),
+                       '</h2><span class="badge">',str(sum(len(v) for v in groups.values())),'건</span></div>'])
         if not groups:
-            pieces.append('<p class="empty-category">해당 기사 없음</p>')
+            pieces.append('<p class="empty">해당 기사 없음</p>')
         for key, articles in groups.items():
-            first=articles[0]
-            pieces.extend(['<article class="article-card">', '<h3>'])
-            link=safe_report_url(first.get('url'))
+            first = articles[0]
+            others = sorted(articles[1:], key=lambda a:(media_rank(a.get('publisher','')), a.get('row', 0)))
+            others_names = []
+            seen = {media_key(first.get('publisher',''))}
+            for a in others:
+                name = a.get('publisher','')
+                if name and media_key(name) not in seen:
+                    others_names.append(name)
+                    seen.add(media_key(name))
+            pieces.extend(['<div class="theme-group"><div class="theme-title">',esc(first['title'])])
+            if others_names:
+                pieces.extend(['<span class="group-media">함께 보도한 매체: ',esc(' · '.join(others_names)),'</span>'])
+            pieces.extend(['</div><article class="article" data-card="',str(len(data)),'"><div class="article-title">'])
+            link = safe_report_url(first.get('url'))
             if link:
-                pieces.append('<a href="'+esc(link)+'" target="_blank" rel="noopener noreferrer">'+esc(first['title'])+'</a>')
+                pieces.extend(['<a href="',esc(link),'" target="_blank" rel="noopener noreferrer">',esc(first['title']),'</a>'])
             else:
                 pieces.append(esc(first['title']))
-            if first.get('publisher'):
-                pieces.append('<span class="headline-media">'+esc(first['publisher'])+'</span>')
-            pieces.append('</h3>')
-            seen={media_key(first.get('publisher',''))}
-            names=[]
-            for a in sorted(articles[1:], key=lambda a:(media_rank(a.get('publisher','')),a['row'])):
-                name=a.get('publisher',''); norm=media_key(name)
-                if name and norm not in seen:
-                    names.append(name);seen.add(norm)
-            if names:
-                pieces.append('<p class="media-line"><strong>보도매체</strong>  '+esc(' · '.join(names))+'</p>')
-            content=summaries.get((category,key), first.get('summary',''))
-            if not content or content == '본문 발췌 전입니다. 기사 원문을 확인하거나 아래 버튼을 누르세요.':
-                content='[미발췌] 아직 기사를 읽지 않았습니다.'
-            pieces.append('<p class="summary'+(' empty' if content.startswith(('[요약 불가]','[미발췌]')) else '')+'">'+esc(content)+'</p>')
-            pieces.append('</article>')
+            summary = summaries.get((cat,key), first.get('summary','')) or ''
+            if summary == '본문 발췌 전입니다. 기사 원문을 확인하거나 아래 버튼을 누르세요.':
+                summary = '[미발췌] 아직 기사를 읽지 않았습니다.'
+            data.append({field: str(first.get(field,'') or '') for field in ('page','author','date')})
+            data[-1]['summary'] = summary
+            pieces.append('</div><div class="article-meta"><span class="media">'+esc(first.get('publisher',''))+'</span>')
+            for field in ('page','author','date'):
+                value = data[-1][field]
+                pieces.extend(['<span data-meta="',field,'"',('' if value else ' hidden'),'>'+esc(value)+'</span>'])
+            pieces.extend(['</div><div class="summary" data-summary>',esc(summary or '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.'),
+                           '</div><details class="edit-controls"><summary>내용 수정</summary><div class="edit"><div class="edit-grid">'])
+            for field,label in (('page','지면'),('author','기자 이름'),('date','발행일')):
+                pieces.extend(['<label>',label,'<input data-field="',field,'" value="',esc(data[-1][field]),'"></label>'])
+            pieces.extend(['</div><label class="summary-label">요약<textarea data-field="summary">',esc(summary),
+                           '</textarea></label><button type="button" data-apply>수정 반영</button></div></details></article></div>'])
         pieces.append('</section>')
-    pieces.extend(['</div>', '</section>', '</main>', '</body>', '</html>'])
-    return '\n'.join(pieces)
-
+    safe_json = json.dumps(data, ensure_ascii=False).replace('<', chr(92)+'u003c').replace('>', chr(92)+'u003e').replace('&', chr(92)+'u0026')
+    pieces.extend(['<footer>편집 내용은 「수정한 HTML 저장」을 누르면 새 파일로 저장됩니다. 기존 파일은 변경되지 않습니다.</footer></main>',
+                   '<script id="report-state" type="application/json">',safe_json,'</script><script>',REPORT_SCRIPT,'</script></body></html>'])
+    return ''.join(pieces)
 
 class ReportApp:
     def __init__(self, root):
