@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Windows desktop clipping report. No AI service/API key is used."""
 import ipaddress
+import html
+from datetime import datetime
 import queue
 import re
 import socket
@@ -179,6 +181,70 @@ def excerpt(text, source):
     return ' '.join(s for _,_,s in chosen)[:700]
 
 
+
+
+REPORT_STYLE = '\n    * {\n      box-sizing: border-box;\n    }\n\n    body {\n      margin: 0;\n      background: #f3f6fb;\n      color: #102b50;\n      font-family: Arial, "Malgun Gothic", sans-serif;\n      font-size: 13px;\n    }\n\n    .page {\n      width: min(100% - 32px, 735px);\n      margin: 16px auto 40px;\n    }\n\n    .upload-card,\n    .article-card {\n      background: #fff;\n      border: 1px solid #d5e1f0;\n      border-radius: 11px;\n    }\n\n    .upload-card {\n      padding: 17px 16px;\n    }\n\n    .upload-card h2 {\n      margin: 0 0 7px;\n      font-size: 13px;\n    }\n\n    .description,\n    .status {\n      margin: 0;\n      color: #6380a7;\n      font-size: 11px;\n      line-height: 1.6;\n    }\n\n    .upload-row {\n      display: flex;\n      gap: 8px;\n      margin: 13px 0 10px;\n    }\n\n    .upload-row input {\n      min-width: 0;\n      flex: 1;\n      padding: 8px;\n      border: 1px solid #c5d6ed;\n      border-radius: 6px;\n      background: #f9fbfe;\n    }\n\n    .upload-row button {\n      flex: none;\n      padding: 0 13px;\n      border: 0;\n      border-radius: 6px;\n      background: #245c9b;\n      color: #fff;\n      font-weight: 700;\n      cursor: pointer;\n    }\n\n    .upload-row button:disabled {\n      opacity: 0.6;\n      cursor: wait;\n    }\n\n    .report {\n      padding-top: 25px;\n    }\n\n    .report h1 {\n      margin: 0 0 25px;\n      font-size: 23px;\n    }\n\n    .category {\n      margin-bottom: 25px;\n    }\n\n    .category h2 {\n      margin: 0 0 13px;\n      padding-bottom: 11px;\n      border-bottom: 1px solid #b6cbe5;\n      color: #173d73;\n      font-size: 16px;\n    }\n\n    .article-card {\n      margin-bottom: 12px;\n      padding: 17px 18px 16px;\n    }\n\n    .article-card h3 {\n      margin: 0 0 14px;\n      font-size: 16px;\n      line-height: 1.5;\n    }\n\n    .article-card h3 a {\n      color: #102b50;\n      text-decoration: none;\n    }\n\n    .article-card h3 a:hover {\n      text-decoration: underline;\n    }\n\n    .headline-media {\n      margin-left: 8px;\n      color: #6380a7;\n      font-size: 11px;\n      font-weight: 400;\n      white-space: nowrap;\n    }\n\n    .media-line {\n      margin: 0 0 14px;\n      font-size: 11px;\n      line-height: 1.6;\n    }\n\n    .media-line strong {\n      color: #245c9b;\n    }\n\n    .summary {\n      margin: 0;\n      padding: 14px;\n      border-radius: 6px;\n      background: #f6f8fc;\n      font-size: 12px;\n      line-height: 1.75;\n      white-space: pre-wrap;\n      overflow-wrap: anywhere;\n    }\n\n    .summary.empty,\n    .empty-category {\n      color: #6380a7;\n    }\n\n    .empty-category {\n      margin: 0 4px;\n      font-size: 12px;\n    }\n\n    @media (max-width: 480px) {\n      .upload-row {\n        flex-direction: column;\n      }\n\n      .upload-row button {\n        min-height: 36px;\n      }\n\n      .headline-media {\n        white-space: normal;\n      }\n    }\n  \n    .report-note {font-size:11px;color:#6380a7;line-height:1.6;margin:0 0 22px;}\n'
+
+
+def safe_report_url(value):
+    """Only public-looking HTTP(S) absolute URLs become clickable links; no network request here."""
+    try:
+        p = urlparse((value or '').strip())
+        if p.scheme.lower() in ('https', 'http') and p.hostname and not p.username and not p.password:
+            return p.geturl()
+    except (ValueError, AttributeError):
+        pass
+    return None
+
+
+def report_html(report_groups, summaries, generated_at=None):
+    """Offline, self-contained read-only snapshot matching the original report layout.
+
+    summaries maps (category, group_key) to the current on-screen text.
+    """
+    esc = lambda value: html.escape(str(value or ''), quote=True)
+    now = generated_at or datetime.now().strftime('%Y-%m-%d %H:%M')
+    pieces = ['<!DOCTYPE html>', '<html lang="ko">', '<head>', '<meta charset="UTF-8">',
+              '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+              '<title>중앙부처동향</title>', '<style>', REPORT_STYLE, '</style>', '</head>',
+              '<body>', '<main class="page">', '<section class="report">',
+              '<h1>중앙부처동향</h1>',
+              '<p class="report-note">생성: '+esc(now)+' · EXE에서 저장한 결과입니다. 본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요.</p>',
+              '<div id="categories">']
+    for category in CATEGORIES:
+        pieces.extend(['<section class="category">', '<h2>'+esc(category)+'</h2>'])
+        groups=report_groups.get(category, {})
+        if not groups:
+            pieces.append('<p class="empty-category">해당 기사 없음</p>')
+        for key, articles in groups.items():
+            first=articles[0]
+            pieces.extend(['<article class="article-card">', '<h3>'])
+            link=safe_report_url(first.get('url'))
+            if link:
+                pieces.append('<a href="'+esc(link)+'" target="_blank" rel="noopener noreferrer">'+esc(first['title'])+'</a>')
+            else:
+                pieces.append(esc(first['title']))
+            if first.get('publisher'):
+                pieces.append('<span class="headline-media">'+esc(first['publisher'])+'</span>')
+            pieces.append('</h3>')
+            seen={media_key(first.get('publisher',''))}
+            names=[]
+            for a in sorted(articles[1:], key=lambda a:(media_rank(a.get('publisher','')),a['row'])):
+                name=a.get('publisher',''); norm=media_key(name)
+                if name and norm not in seen:
+                    names.append(name);seen.add(norm)
+            if names:
+                pieces.append('<p class="media-line"><strong>보도매체</strong>  '+esc(' · '.join(names))+'</p>')
+            content=summaries.get((category,key), first.get('summary',''))
+            if not content or content == '본문 발췌 전입니다. 기사 원문을 확인하거나 아래 버튼을 누르세요.':
+                content='[미발췌] 아직 기사를 읽지 않았습니다.'
+            pieces.append('<p class="summary'+(' empty' if content.startswith(('[요약 불가]','[미발췌]')) else '')+'">'+esc(content)+'</p>')
+            pieces.append('</article>')
+        pieces.append('</section>')
+    pieces.extend(['</div>', '</section>', '</main>', '</body>', '</html>'])
+    return '\n'.join(pieces)
+
+
 class ReportApp:
     def __init__(self, root):
         self.root = root
@@ -186,12 +252,15 @@ class ReportApp:
         root.geometry('930x720')
         self.events = queue.Queue()
         self.cards = []
+        self.report_groups = None
         self.busy = False
         header = ttk.Frame(root, padding=12); header.pack(fill='x')
         ttk.Label(header,text='중앙부처동향',font=('맑은 고딕',18,'bold')).pack(side='left', padx=(0,18))
         ttk.Button(header,text='기사 엑셀 열기',command=self.open_excel).pack(side='left',padx=5)
         self.all_button = ttk.Button(header,text='모든 대표 기사 발췌',command=self.fetch_all)
         self.all_button.pack(side='left',padx=5)
+        self.export_button = ttk.Button(header,text='HTML로 내보내기',command=self.export_html)
+        self.export_button.pack(side='left',padx=5)
         self.status = ttk.Label(root,text='기사 엑셀 파일을 선택하세요. 발췌는 인터넷 연결이 필요합니다.',padding=(12,2))
         self.status.pack(fill='x')
         self.tabs = ttk.Notebook(root); self.tabs.pack(fill='both',expand=True,padx=12,pady=8)
@@ -221,6 +290,8 @@ class ReportApp:
         for body in self.panes.values():
             for child in body.winfo_children(): child.destroy()
         self.cards=[]
+        self.report_groups = report
+        self.export_button.configure(state='normal')
         for cat in CATEGORIES:
             groups=report[cat]
             if not groups:
@@ -246,6 +317,33 @@ class ReportApp:
                 self.cards.append((first,text))
         self.status.configure(text=f'기사 {count}건을 {len(self.cards)}개 카드로 표시했습니다. 발췌 내용은 저장되지 않습니다.')
 
+    def export_html(self):
+        if self.busy:
+            messagebox.showinfo('처리 중', '기사 발췌가 끝난 뒤 저장해 주세요.')
+            return
+        if self.report_groups is None:
+            messagebox.showinfo('엑셀 선택', '먼저 기사 엑셀을 여세요.')
+            return
+        summaries={}
+        # self.cards follows CATEGORIES / OrderedDict group order from read_report.
+        card_iter=iter(self.cards)
+        for category in CATEGORIES:
+            for key in self.report_groups[category]:
+                _,widget=next(card_iter)
+                summaries[(category,key)]=widget.get('1.0','end-1c').strip()
+        filename='중앙부처동향_'+datetime.now().strftime('%Y-%m-%d')+'.html'
+        target=filedialog.asksaveasfilename(title='HTML 보고서 저장',defaultextension='.html',
+                 initialfile=filename,filetypes=[('HTML 파일','*.html')])
+        if not target:
+            return
+        try:
+            Path(target).write_text(report_html(self.report_groups,summaries),encoding='utf-8')
+        except OSError as exc:
+            messagebox.showerror('저장 실패',str(exc))
+            return
+        self.status.configure(text='HTML 보고서를 저장했습니다: '+target)
+        messagebox.showinfo('저장 완료', 'HTML 보고서를 저장했습니다. 파일을 브라우저에서 열 수 있습니다.\n'+target)
+
     @staticmethod
     def set_text(widget,value):
         widget.configure(state='normal'); widget.delete('1.0','end');widget.insert('1.0',value);widget.configure(state='disabled')
@@ -265,7 +363,7 @@ class ReportApp:
 
     def start(self,tasks):
         if self.busy or not tasks: return
-        self.busy=True;self.all_button.configure(state='disabled')
+        self.busy=True;self.all_button.configure(state='disabled');self.export_button.configure(state='disabled')
         self.status.configure(text=f'{len(tasks)}개 기사 확인 중…')
         threading.Thread(target=self.worker,args=(tasks,),daemon=True).start()
 
@@ -280,7 +378,7 @@ class ReportApp:
                 try: self.set_text(a,b)
                 except tk.TclError: pass
             elif kind=='status': self.status.configure(text=a)
-            else: self.busy=False;self.all_button.configure(state='normal')
+            else: self.busy=False;self.all_button.configure(state='normal');self.export_button.configure(state='normal')
         self.root.after(100,self.poll)
 
 
