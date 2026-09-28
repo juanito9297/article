@@ -2,7 +2,9 @@
 """Windows desktop clipping report. No AI service/API key is used."""
 import ipaddress
 import html
+import json
 from datetime import datetime
+from pathlib import Path
 import queue
 import re
 import socket
@@ -11,7 +13,7 @@ import tkinter as tk
 import webbrowser
 from collections import Counter, OrderedDict
 from tkinter import filedialog, messagebox, ttk
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -88,36 +90,47 @@ def read_report(path):
 
 
 def validate_url(url):
-    parsed = urlparse(url.strip())
+    url = url.strip()
+    parsed = urlparse(url)
     if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('공개 HTTP(S) 기사 링크가 아닙니다.')
     if parsed.port not in (None, 80, 443):
         raise ValueError('일반 웹 포트가 아닙니다.')
     host = parsed.hostname
+    if host.lower() == 'localhost' or host.lower().endswith(('.localhost','.local','.internal','.lan')):
+        raise ValueError('로컬 주소는 사용할 수 없습니다.')
     try:
         addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == 'https' else 80))
         if not addresses or any(not ipaddress.ip_address(info[4][0]).is_global for info in addresses):
             raise ValueError('사설망 또는 로컬 주소는 사용할 수 없습니다.')
     except socket.gaierror as exc:
-        raise ValueError('기사 주소를 확인할 수 없습니다.') from exc
+        # Proxy servers can resolve public hosts that a corporate PC cannot resolve locally.
+        if not requests.utils.get_environ_proxies(url):
+            raise ValueError('기사 주소를 확인할 수 없습니다.') from exc
     return url
 
 
 def download_article(url):
+    # Use OS proxy / certificate settings. Browser and EXE may still differ.
     session = requests.Session()
-    session.trust_env = False
-    headers = {'User-Agent':'Mozilla/5.0 (compatible; ArticleExcerpt/1.0)', 'Accept':'text/html,application/xhtml+xml'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.7',
+    }
     try:
-        for _ in range(5):
+        for _ in range(6):
             validate_url(url)
-            with session.get(url, headers=headers, timeout=(5, 12), allow_redirects=False, stream=True) as response:
-                if response.status_code in (301,302,303,307,308):
-                    from urllib.parse import urljoin
-                    url = urljoin(url, response.headers.get('Location', ''))
+            with session.get(url, headers=headers, timeout=(7, 18), allow_redirects=False, stream=True) as response:
+                if response.status_code in (301, 302, 303, 307, 308):
+                    location = response.headers.get('Location')
+                    if not location:
+                        raise ValueError('이동할 페이지 주소가 없는 리디렉션입니다.')
+                    url = urljoin(url, location)
                     continue
                 response.raise_for_status()
-                content_type = response.headers.get('Content-Type','').lower()
-                if 'html' not in content_type:
+                content_type = response.headers.get('Content-Type', '').lower()
+                if content_type and not any(t in content_type for t in ('html', 'xhtml')):
                     raise ValueError('HTML 기사 페이지가 아닙니다.')
                 pieces, total = [], 0
                 for part in response.iter_content(chunk_size=16384):
@@ -127,23 +140,53 @@ def download_article(url):
                     pieces.append(part)
                 response._content = b''.join(pieces)
                 response.encoding = response.apparent_encoding or response.encoding or 'utf-8'
-                return response.text
+                text = response.text
+                if '<html' not in text[:3000].lower() and '<article' not in text.lower() and '<meta' not in text.lower():
+                    raise ValueError('응답에서 기사 HTML을 찾지 못했습니다.')
+                return text
         raise ValueError('리디렉션이 너무 많습니다.')
     finally:
         session.close()
-
 
 def clean_text(value):
     return re.sub(r'\s+', ' ', value or '').strip()
 
 
-def extract_article(html):
-    soup = BeautifulSoup(html, 'html.parser')
+def extract_article(html_text):
+    soup = BeautifulSoup(html_text, 'html.parser')
+    # Keep metadata before deleting unrelated layout elements.
+    description = ''
+    for attrs in ({'property':'og:description'}, {'name':'description'}, {'name':'twitter:description'}):
+        meta = soup.find('meta', attrs=attrs)
+        candidate = clean_text(meta.get('content')) if meta else ''
+        if len(candidate) >= 60 and len(candidate) > len(description):
+            description = candidate
+    for tag in soup.select('script[type="application/ld+json"]'):
+        try:
+            structured = json.loads(tag.string or tag.get_text())
+        except (ValueError, TypeError):
+            continue
+        def bodies(obj):
+            if isinstance(obj, dict):
+                value = obj.get('articleBody')
+                if isinstance(value, str):
+                    yield clean_text(value)
+                for child in obj.values():
+                    if isinstance(child, (dict, list)):
+                        yield from bodies(child)
+            elif isinstance(obj, list):
+                for child in obj:
+                    yield from bodies(child)
+        matches = [v for v in bodies(structured) if len(v) >= 240]
+        if matches:
+            return max(matches, key=len), '본문 발췌'
     for tag in soup.select('script,style,nav,footer,header,aside,form,iframe,button, .ad, .advertisement, .related, .comments, [class*="advert"], [class*="share"]'):
         tag.decompose()
     selectors = ['[itemprop="articleBody"]','[data-article-body]','.article_body','.article-body',
                  '#articleBody','#article_body','#articleView','.article_view','.news_body','.news-body',
-                 '#newsView','.news_view','#article_txt','.article_txt','article']
+                 '#newsView','.news_view','#article_txt','.article_txt','[class*="article-content"]',
+                 '[class*="articleContent"]', '.news_end', '#dic_area', '#articeBody',
+                 '[class*="article_body"]', '[id*="articleBody"]', 'article']
     for selector in selectors:
         matches = soup.select(selector)
         if matches:
@@ -151,12 +194,16 @@ def extract_article(html):
             longest = max(candidates, key=len)
             if len(longest) >= 240:
                 return longest, '본문 발췌'
-    for attrs in ({'property':'og:description'}, {'name':'description'}, {'name':'twitter:description'}):
-        meta = soup.find('meta', attrs=attrs)
-        if meta and len(clean_text(meta.get('content'))) >= 60:
-            return clean_text(meta.get('content')), '공개 설명문'
+    # Last resort: sufficiently long paragraphs only, not the whole page/navigation.
+    for parent in soup.select('main, [role="main"]'):
+        paragraphs = [clean_text(p.get_text(' ', strip=True)) for p in parent.select('p')]
+        paragraphs = [p for p in paragraphs if len(p) >= 35]
+        joined = ' '.join(paragraphs)
+        if len(joined) >= 300:
+            return joined, '본문 발췌'
+    if description:
+        return description, '공개 설명문'
     raise ValueError('기사 본문과 공개 설명문을 찾지 못했습니다.')
-
 
 def excerpt(text, source):
     if source == '공개 설명문':
@@ -300,8 +347,9 @@ class ReportApp:
                 first=articles[0]
                 frame=ttk.LabelFrame(self.panes[cat],text=f"{first['title']}   [{first['publisher']}]",padding=10)
                 frame.pack(fill='x',padx=5,pady=6)
-                if first['url']:
-                    ttk.Button(frame,text='원문 열기',command=lambda u=first['url']:webbrowser.open(u)).pack(anchor='w')
+                source_url=next((a['url'] for a in articles if a['url']), '')
+                if source_url:
+                    ttk.Button(frame,text='원문 열기',command=lambda u=source_url:webbrowser.open(u)).pack(anchor='w')
                 others=sorted(articles[1:],key=lambda a:(media_rank(a['publisher']),a['row']))
                 names=[]; seen={media_key(first['publisher'])}
                 for article in others:
@@ -312,9 +360,9 @@ class ReportApp:
                 text.pack(fill='x',pady=5)
                 initial = first['summary'] or '본문 발췌 전입니다. 기사 원문을 확인하거나 아래 버튼을 누르세요.'
                 self.set_text(text,initial)
-                btn=ttk.Button(frame,text='이 기사 발췌',command=lambda a=first,t=text:self.fetch_one(a,t))
+                btn=ttk.Button(frame,text='이 기사 발췌',command=lambda a=articles,t=text:self.fetch_one(a,t))
                 btn.pack(anchor='w')
-                self.cards.append((first,text))
+                self.cards.append((articles,text))
         self.status.configure(text=f'기사 {count}건을 {len(self.cards)}개 카드로 표시했습니다. 발췌 내용은 저장되지 않습니다.')
 
     def export_html(self):
@@ -338,7 +386,7 @@ class ReportApp:
             return
         try:
             Path(target).write_text(report_html(self.report_groups,summaries),encoding='utf-8')
-        except OSError as exc:
+        except Exception as exc:
             messagebox.showerror('저장 실패',str(exc))
             return
         self.status.configure(text='HTML 보고서를 저장했습니다: '+target)
@@ -349,17 +397,34 @@ class ReportApp:
         widget.configure(state='normal'); widget.delete('1.0','end');widget.insert('1.0',value);widget.configure(state='disabled')
 
     def worker(self, tasks):
-        for n,(article,widget) in enumerate(tasks,1):
-            try:
-                if not article['url']: raise ValueError('기사 URL이 없습니다.')
-                html=download_article(article['url'])
-                text,source=extract_article(html)
-                result=f'[{source}] {excerpt(text,source)}'
-            except Exception as exc:
-                result=f'[요약 불가] {str(exc)[:180]}'
-            self.events.put(('article',widget,result))
-            self.events.put(('status',f'{n}/{len(tasks)}개 기사 처리 완료'))
-        self.events.put(('done',None,None))
+        for n, (articles, widget) in enumerate(tasks, 1):
+            failures = []
+            tried = set()
+            result = None
+            # Representative first; if unreadable, try other articles in the same cluster.
+            for article in articles:
+                url = (article.get('url') or '').strip()
+                if not url or url in tried:
+                    continue
+                tried.add(url)
+                try:
+                    page = download_article(url)
+                    text, source = extract_article(page)
+                    publisher = article.get('publisher') or '매체 미상'
+                    result = f'[{source} · {publisher}] {excerpt(text, source)}'
+                    break
+                except requests.exceptions.RequestException as exc:
+                    failures.append(f'{article.get("publisher") or "매체 미상"}: 접속 실패 ({type(exc).__name__}: {str(exc)[:100]})')
+                except Exception as exc:
+                    failures.append(f'{article.get("publisher") or "매체 미상"}: {str(exc)[:130]}')
+            if result is None:
+                if not tried:
+                    result = '[요약 불가] 이 기사 묶음의 URL이 비어 있습니다. 엑셀의 기사 URL 열을 확인해 주세요.'
+                else:
+                    result = '[요약 불가] ' + ' / '.join(failures)[:650]
+            self.events.put(('article', widget, result))
+            self.events.put(('status', f'{n}/{len(tasks)}개 기사 처리 완료'))
+        self.events.put(('done', None, None))
 
     def start(self,tasks):
         if self.busy or not tasks: return
@@ -367,7 +432,7 @@ class ReportApp:
         self.status.configure(text=f'{len(tasks)}개 기사 확인 중…')
         threading.Thread(target=self.worker,args=(tasks,),daemon=True).start()
 
-    def fetch_one(self,article,widget): self.start([(article,widget)])
+    def fetch_one(self,articles,widget): self.start([(articles,widget)])
     def fetch_all(self): self.start(self.cards.copy())
 
     def poll(self):
