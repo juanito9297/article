@@ -23,6 +23,8 @@ CATEGORIES = ("정치", "경제", "사회일반", "해외동향", "오피니언"
 PRIORITY = ("조선일보", "중앙일보", "동아일보", "한겨레", "경향신문", "한국경제", "매일경제")
 ALIASES = {"조선":"조선일보", "중앙":"중앙일보", "동아":"동아일보", "경향":"경향신문", "한경":"한국경제", "매경":"매일경제"}
 MAX_BYTES = 2_000_000
+ARTICLE_DEADLINE = 25  # seconds, including DNS/redirect/body processing
+MAX_LINKS_PER_CARD = 2  # do not let a single cluster hold the entire queue indefinitely
 
 
 def media_key(name):
@@ -147,6 +149,29 @@ def download_article(url):
         raise ValueError('리디렉션이 너무 많습니다.')
     finally:
         session.close()
+
+def fetch_with_deadline(url, seconds=ARTICLE_DEADLINE):
+    """Bound an article attempt even when DNS/proxy/streaming never returns.
+
+    A timed-out daemon thread cannot be forcibly stopped. It may finish later,
+    but it cannot update the UI or block program exit.
+    """
+    answers = queue.Queue(maxsize=1)
+    def attempt():
+        try:
+            page = download_article(url)
+            answers.put((True, extract_article(page)))
+        except Exception as exc:
+            answers.put((False, exc))
+    threading.Thread(target=attempt, daemon=True).start()
+    try:
+        ok, value = answers.get(timeout=seconds)
+    except queue.Empty as exc:
+        raise TimeoutError(f'{seconds}초 안에 응답하지 않았습니다(DNS·접속·본문 처리 포함).') from exc
+    if not ok:
+        raise value
+    return value
+
 
 def clean_text(value):
     return re.sub(r'\s+', ' ', value or '').strip()
@@ -303,7 +328,8 @@ class ReportApp:
         self.busy = False
         header = ttk.Frame(root, padding=12); header.pack(fill='x')
         ttk.Label(header,text='중앙부처동향',font=('맑은 고딕',18,'bold')).pack(side='left', padx=(0,18))
-        ttk.Button(header,text='기사 엑셀 열기',command=self.open_excel).pack(side='left',padx=5)
+        self.open_button = ttk.Button(header,text='기사 엑셀 열기',command=self.open_excel)
+        self.open_button.pack(side='left',padx=5)
         self.all_button = ttk.Button(header,text='모든 대표 기사 발췌',command=self.fetch_all)
         self.all_button.pack(side='left',padx=5)
         self.export_button = ttk.Button(header,text='HTML로 내보내기',command=self.export_html)
@@ -327,6 +353,9 @@ class ReportApp:
         root.after(100,self.poll)
 
     def open_excel(self):
+        if self.busy:
+            messagebox.showinfo('처리 중', '새 엑셀은 현재 기사 처리가 끝난 후 열어 주세요.')
+            return
         path = filedialog.askopenfilename(title='기사 엑셀 선택',filetypes=[('Excel 파일','*.xlsx')])
         if not path:
             return
@@ -366,9 +395,6 @@ class ReportApp:
         self.status.configure(text=f'기사 {count}건을 {len(self.cards)}개 카드로 표시했습니다. 발췌 내용은 저장되지 않습니다.')
 
     def export_html(self):
-        if self.busy:
-            messagebox.showinfo('처리 중', '기사 발췌가 끝난 뒤 저장해 주세요.')
-            return
         if self.report_groups is None:
             messagebox.showinfo('엑셀 선택', '먼저 기사 엑셀을 여세요.')
             return
@@ -389,62 +415,85 @@ class ReportApp:
         except Exception as exc:
             messagebox.showerror('저장 실패',str(exc))
             return
-        self.status.configure(text='HTML 보고서를 저장했습니다: '+target)
-        messagebox.showinfo('저장 완료', 'HTML 보고서를 저장했습니다. 파일을 브라우저에서 열 수 있습니다.\n'+target)
+        self.status.configure(text=('발췌 진행 중 · 현재 결과를 저장했습니다: ' if self.busy else 'HTML 보고서를 저장했습니다: ')+target)
+        messagebox.showinfo('저장 완료', ('진행 중 결과를 저장했습니다. 완료 후 다시 저장하면 최종 결과를 반영할 수 있습니다.\n' if self.busy else 'HTML 보고서를 저장했습니다. 파일을 브라우저에서 열 수 있습니다.\n')+target)
 
     @staticmethod
     def set_text(widget,value):
         widget.configure(state='normal'); widget.delete('1.0','end');widget.insert('1.0',value);widget.configure(state='disabled')
 
     def worker(self, tasks):
-        for n, (articles, widget) in enumerate(tasks, 1):
-            failures = []
-            tried = set()
-            result = None
-            # Representative first; if unreadable, try other articles in the same cluster.
-            for article in articles:
-                url = (article.get('url') or '').strip()
-                if not url or url in tried:
-                    continue
-                tried.add(url)
+        try:
+            for n, (articles, widget) in enumerate(tasks, 1):
                 try:
-                    page = download_article(url)
-                    text, source = extract_article(page)
-                    publisher = article.get('publisher') or '매체 미상'
-                    result = f'[{source} · {publisher}] {excerpt(text, source)}'
-                    break
-                except requests.exceptions.RequestException as exc:
-                    failures.append(f'{article.get("publisher") or "매체 미상"}: 접속 실패 ({type(exc).__name__}: {str(exc)[:100]})')
+                    failures = []
+                    tried = set()
+                    result = None
+                    candidates = []
+                    for article in articles:
+                        url = (article.get('url') or '').strip()
+                        if url and url not in tried:
+                            tried.add(url)
+                            candidates.append((article, url))
+                    for index, (article, url) in enumerate(candidates[:MAX_LINKS_PER_CARD], 1):
+                        publisher = article.get('publisher') or '매체 미상'
+                        self.events.put(('status', f'{n}/{len(tasks)}번 기사 · {publisher} 링크 {index}/{min(len(candidates), MAX_LINKS_PER_CARD)} 확인 중 (최대 {ARTICLE_DEADLINE}초)…', None))
+                        try:
+                            text, source = fetch_with_deadline(url)
+                            result = f'[{source} · {publisher}] {excerpt(text, source)}'
+                            break
+                        except Exception as exc:
+                            failures.append(f'{publisher}: {type(exc).__name__}: {str(exc)[:110]}')
+                    if result is None:
+                        if not candidates:
+                            result = '[요약 불가] 이 기사 묶음의 URL이 비어 있습니다. 엑셀의 기사 URL 열을 확인해 주세요.'
+                        else:
+                            suffix = f' / 다른 링크 {len(candidates)-MAX_LINKS_PER_CARD}개는 미시도' if len(candidates)>MAX_LINKS_PER_CARD else ''
+                            result = '[요약 불가] ' + (' / '.join(failures)+suffix)[:650]
                 except Exception as exc:
-                    failures.append(f'{article.get("publisher") or "매체 미상"}: {str(exc)[:130]}')
-            if result is None:
-                if not tried:
-                    result = '[요약 불가] 이 기사 묶음의 URL이 비어 있습니다. 엑셀의 기사 URL 열을 확인해 주세요.'
-                else:
-                    result = '[요약 불가] ' + ' / '.join(failures)[:650]
-            self.events.put(('article', widget, result))
-            self.events.put(('status', f'{n}/{len(tasks)}개 기사 처리 완료'))
-        self.events.put(('done', None, None))
+                    result = f'[요약 불가] 처리 오류: {type(exc).__name__}: {str(exc)[:180]}'
+                self.events.put(('article', widget, result))
+                self.events.put(('status', f'{n}/{len(tasks)}개 기사 처리 완료', None))
+        finally:
+            self.events.put(('done', None, None))
 
-    def start(self,tasks):
-        if self.busy or not tasks: return
-        self.busy=True;self.all_button.configure(state='disabled');self.export_button.configure(state='disabled')
-        self.status.configure(text=f'{len(tasks)}개 기사 확인 중…')
-        threading.Thread(target=self.worker,args=(tasks,),daemon=True).start()
+    def start(self, tasks):
+        if self.busy or not tasks:
+            return
+        self.busy = True
+        self.all_button.configure(state='disabled')
+        self.open_button.configure(state='disabled')
+        # HTML output is a snapshot and remains available during processing.
+        self.export_button.configure(state='normal')
+        self.status.configure(text=f'0/{len(tasks)}개 기사 처리 완료 · 첫 링크 확인 중…')
+        threading.Thread(target=self.worker, args=(tasks,), daemon=True).start()
 
-    def fetch_one(self,articles,widget): self.start([(articles,widget)])
-    def fetch_all(self): self.start(self.cards.copy())
+    def fetch_one(self, articles, widget):
+        self.start([(articles, widget)])
+
+    def fetch_all(self):
+        self.start(self.cards.copy())
 
     def poll(self):
         while True:
-            try: kind,a,b=self.events.get_nowait()
-            except queue.Empty: break
-            if kind=='article':
-                try: self.set_text(a,b)
-                except tk.TclError: pass
-            elif kind=='status': self.status.configure(text=a)
-            else: self.busy=False;self.all_button.configure(state='normal');self.export_button.configure(state='normal')
-        self.root.after(100,self.poll)
+            try:
+                kind, a, b = self.events.get_nowait()
+            except queue.Empty:
+                break
+            if kind == 'article':
+                try:
+                    self.set_text(a, b)
+                except tk.TclError:
+                    pass
+            elif kind == 'status':
+                self.status.configure(text=a)
+            elif kind == 'done':
+                self.busy = False
+                self.open_button.configure(state='normal')
+                self.all_button.configure(state='normal')
+                self.export_button.configure(state='normal')
+                self.status.configure(text='발췌 처리가 끝났습니다. 실패한 기사는 카드의 오류 문구를 확인해 주세요.')
+        self.root.after(100, self.poll)
 
 
 if __name__=='__main__':
