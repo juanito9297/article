@@ -19,7 +19,6 @@ import requests
 from bs4 import BeautifulSoup
 from openpyxl import load_workbook
 
-CATEGORIES = ("정치", "경제", "사회일반", "해외동향", "오피니언")
 PRIORITY = ("조선일보", "중앙일보", "동아일보", "한겨레", "경향신문", "한국경제", "매일경제")
 ALIASES = {"조선":"조선일보", "중앙":"중앙일보", "동아":"동아일보", "경향":"경향신문", "한경":"한국경제", "매경":"매일경제"}
 MAX_BYTES = 2_000_000
@@ -74,14 +73,33 @@ def read_report(path):
             raise ValueError("첫 행에 '기사 제목'과 '매체명' 열이 필요합니다.")
         def cell(row, i):
             return str(row[i]).strip() if i is not None and i < len(row) and row[i] is not None else ''
-        result = {c: OrderedDict() for c in CATEGORIES}
-        current = None
-        count = 0
+        # 목차는 코드에 고정하지 않고, '기사 목록' 시트에서 읽습니다.
+        # 기사제목 열에 값이 있고 매체명 열이 비어 있는 행을 목차 행으로 인식합니다.
+        categories = []
+        buffered_rows = []
         for number, row in enumerate(rows, 2):
             title = cell(row, title_i)
+            publisher = cell(row, pub_i)
             if not title:
                 continue
-            if title in CATEGORIES:
+            if not publisher:
+                if title not in categories:
+                    categories.append(title)
+                buffered_rows.append((number, row, title, True))
+            else:
+                buffered_rows.append((number, row, title, False))
+
+        if not categories:
+            raise ValueError(
+                "엑셀에서 목차를 찾지 못했습니다.\n"
+                "'기사 목록' 시트에서 목차 행의 '매체명' 셀을 비워 주세요."
+            )
+
+        result = {c: OrderedDict() for c in categories}
+        current = None
+        count = 0
+        for number, row, title, is_category in buffered_rows:
+            if is_category:
                 current = title
                 continue
             if current is None:
@@ -657,15 +675,45 @@ def report_html(report_groups, summaries, generated_at=None):
                    '<script id="report-state" type="application/json">',safe_json,'</script><script>',REPORT_SCRIPT,'</script></body></html>'])
     return ''.join(pieces)
 
+def simple_input(parent, title, prompt):
+    """Tkinter 기본 askstring 대신 자체 입력창을 사용해 한글 IME 환경에서도 안정적으로 동작시킵니다."""
+    result = {'value': None}
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.transient(parent)
+    win.grab_set()
+    win.resizable(False, False)
+    ttk.Label(win, text=prompt, padding=(15, 12), justify='left').pack(fill='x')
+    var = tk.StringVar()
+    entry = ttk.Entry(win, textvariable=var, width=35)
+    entry.pack(padx=15, pady=(0, 12))
+    buttons = ttk.Frame(win, padding=(15, 0, 15, 12)); buttons.pack(fill='x')
+    def ok():
+        result['value'] = var.get()
+        win.destroy()
+    def cancel():
+        win.destroy()
+    ttk.Button(buttons, text='확인', command=ok).pack(side='right', padx=3)
+    ttk.Button(buttons, text='취소', command=cancel).pack(side='right', padx=3)
+    entry.focus_set()
+    win.bind('<Return>', lambda e: ok())
+    win.bind('<Escape>', lambda e: cancel())
+    parent.wait_window(win)
+    return result['value']
+
+
 class ReportApp:
     def __init__(self, root):
         self.root = root
         root.title('중앙부처동향 — 기사 본문 발췌')
-        root.geometry('930x720')
+        root.geometry('1000x760')
         self.events = queue.Queue()
         self.cards = []
         self.report_groups = None
         self.busy = False
+        self.current_excel = None
+        self.card_widgets = {}
+
         header = ttk.Frame(root, padding=12); header.pack(fill='x')
         ttk.Label(header,text='중앙부처동향',font=('맑은 고딕',18,'bold')).pack(side='left', padx=(0,18))
         self.open_button = ttk.Button(header,text='기사 엑셀 열기',command=self.open_excel)
@@ -674,23 +722,94 @@ class ReportApp:
         self.all_button.pack(side='left',padx=5)
         self.export_button = ttk.Button(header,text='HTML로 내보내기',command=self.export_html)
         self.export_button.pack(side='left',padx=5)
+        self.add_category_button = ttk.Button(header,text='목차 추가',command=self.add_category,state='disabled')
+        self.add_category_button.pack(side='left',padx=5)
         self.status = ttk.Label(root,text='기사 엑셀 파일을 선택하세요. 발췌는 인터넷 연결이 필요합니다.',padding=(12,2))
         self.status.pack(fill='x')
         self.tabs = ttk.Notebook(root); self.tabs.pack(fill='both',expand=True,padx=12,pady=8)
         self.panes = {}
-        for category in CATEGORIES:
-            frame=ttk.Frame(self.tabs); self.tabs.add(frame,text=category)
-            canvas=tk.Canvas(frame,highlightthickness=0)
-            bar=ttk.Scrollbar(frame,orient='vertical',command=canvas.yview)
-            body=ttk.Frame(canvas)
-            body.bind('<Configure>',lambda e,c=canvas:c.configure(scrollregion=c.bbox('all')))
-            window=canvas.create_window((0,0),window=body,anchor='nw')
-            canvas.bind('<Configure>',lambda e,c=canvas,w=window:c.itemconfigure(w,width=e.width))
-            canvas.configure(yscrollcommand=bar.set)
-            canvas.pack(side='left',fill='both',expand=True)
-            bar.pack(side='right',fill='y')
-            self.panes[category]=body
         root.after(100,self.poll)
+
+    def _make_pane(self, category):
+        frame=ttk.Frame(self.tabs)
+        self.tabs.add(frame,text=category)
+        toolbar=ttk.Frame(frame,padding=(5,5,5,0)); toolbar.pack(fill='x')
+        ttk.Button(toolbar,text='이름 변경',command=lambda c=category:self.rename_category(c)).pack(side='left',padx=2)
+        ttk.Button(toolbar,text='▲ 위로',command=lambda c=category:self.move_category(c,-1)).pack(side='left',padx=2)
+        ttk.Button(toolbar,text='▼ 아래로',command=lambda c=category:self.move_category(c,1)).pack(side='left',padx=2)
+        ttk.Button(toolbar,text='목차 삭제',command=lambda c=category:self.delete_category(c)).pack(side='left',padx=2)
+        canvas=tk.Canvas(frame,highlightthickness=0)
+        bar=ttk.Scrollbar(frame,orient='vertical',command=canvas.yview)
+        body=ttk.Frame(canvas)
+        body.bind('<Configure>',lambda e,c=canvas:c.configure(scrollregion=c.bbox('all')))
+        window=canvas.create_window((0,0),window=body,anchor='nw')
+        canvas.bind('<Configure>',lambda e,c=canvas,w=window:c.itemconfigure(w,width=e.width))
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side='left',fill='both',expand=True)
+        bar.pack(side='right',fill='y')
+        self.panes[category]=body
+
+    def _category_order(self):
+        return list(self.report_groups.keys()) if self.report_groups is not None else []
+
+    def _sync_category_order(self):
+        if self.report_groups is None:
+            return
+        order=[]
+        for tab_id in self.tabs.tabs():
+            order.append(self.tabs.tab(tab_id,'text'))
+        self.report_groups = OrderedDict((name,self.report_groups[name]) for name in order if name in self.report_groups)
+
+    def _save_visible_summaries(self):
+        for (category,key), widget in list(self.card_widgets.items()):
+            try:
+                self.card_summary[(category,key)] = widget.get('1.0','end-1c').strip()
+            except tk.TclError:
+                pass
+
+    def _rebuild(self):
+        if self.report_groups is None:
+            return
+        self._save_visible_summaries()
+        for tab_id in self.tabs.tabs():
+            self.tabs.forget(tab_id)
+        self.panes={}
+        self.card_widgets={}
+        self.cards=[]
+        for category in self.report_groups:
+            self._make_pane(category)
+            groups=self.report_groups[category]
+            body=self.panes[category]
+            if not groups:
+                ttk.Label(body,text='해당 기사 없음',padding=15).pack(anchor='w')
+            for key, articles in groups.items():
+                first=articles[0]
+                frame=ttk.LabelFrame(body,text=f"{first['title']}   [{first['publisher']}]",padding=10)
+                frame.pack(fill='x',padx=5,pady=6)
+                source_url=next((a['url'] for a in articles if a['url']), '')
+                if source_url:
+                    ttk.Button(frame,text='원문 열기',command=lambda u=source_url:webbrowser.open(u)).pack(anchor='w')
+                others=sorted(articles[1:],key=lambda a:(media_rank(a['publisher']),a['row']))
+                names=[]; seen={media_key(first['publisher'])}
+                for article in others:
+                    name=article['publisher']; k=media_key(name)
+                    if name and k not in seen: names.append(name);seen.add(k)
+                if names:
+                    ttk.Label(frame,text='보도매체  '+' · '.join(names),foreground='#245c9b',wraplength=900).pack(anchor='w',pady=5)
+                text=tk.Text(frame,height=4,wrap='word',font=('맑은 고딕',10),background='#f6f8fc')
+                text.pack(fill='x',pady=5)
+                summary=self.card_summary.get((category,key), first['summary'] or '본문 발췌 전입니다. 기사 원문을 확인하거나 아래 버튼을 누르세요.')
+                self.set_text(text,summary)
+                btnrow=ttk.Frame(frame); btnrow.pack(fill='x',pady=(0,3))
+                ttk.Button(btnrow,text='이 기사 발췌',command=lambda a=articles,t=text:self.fetch_one(a,t)).pack(side='left')
+                ttk.Label(btnrow,text='이동:').pack(side='left',padx=(12,3))
+                move_var=tk.StringVar(value=category)
+                move_box=ttk.Combobox(btnrow,textvariable=move_var,values=list(self.report_groups.keys()),state='readonly',width=16)
+                move_box.pack(side='left')
+                ttk.Button(btnrow,text='이동',command=lambda c=category,k=key,v=move_var:self.move_article(c,k,v.get())).pack(side='left',padx=3)
+                self.card_widgets[(category,key)]=text
+                self.cards.append((articles,text))
+        self.add_category_button.configure(state='normal')
 
     def open_excel(self):
         if self.busy:
@@ -703,48 +822,110 @@ class ReportApp:
             report,count=read_report(path)
         except Exception as exc:
             messagebox.showerror('파일 오류',str(exc)); return
-        for body in self.panes.values():
-            for child in body.winfo_children(): child.destroy()
-        self.cards=[]
+        self.current_excel = path
         self.report_groups = report
+        self.card_summary = {}
         self.export_button.configure(state='normal')
-        for cat in CATEGORIES:
-            groups=report[cat]
-            if not groups:
-                ttk.Label(self.panes[cat],text='해당 기사 없음',padding=15).pack(anchor='w')
-            for articles in groups.values():
-                first=articles[0]
-                frame=ttk.LabelFrame(self.panes[cat],text=f"{first['title']}   [{first['publisher']}]",padding=10)
-                frame.pack(fill='x',padx=5,pady=6)
-                source_url=next((a['url'] for a in articles if a['url']), '')
-                if source_url:
-                    ttk.Button(frame,text='원문 열기',command=lambda u=source_url:webbrowser.open(u)).pack(anchor='w')
-                others=sorted(articles[1:],key=lambda a:(media_rank(a['publisher']),a['row']))
-                names=[]; seen={media_key(first['publisher'])}
-                for article in others:
-                    name=article['publisher']; key=media_key(name)
-                    if name and key not in seen: names.append(name);seen.add(key)
-                if names: ttk.Label(frame,text='보도매체  '+' · '.join(names),foreground='#245c9b',wraplength=820).pack(anchor='w',pady=5)
-                text=tk.Text(frame,height=4,wrap='word',font=('맑은 고딕',10),background='#f6f8fc')
-                text.pack(fill='x',pady=5)
-                initial = first['summary'] or '본문 발췌 전입니다. 기사 원문을 확인하거나 아래 버튼을 누르세요.'
-                self.set_text(text,initial)
-                btn=ttk.Button(frame,text='이 기사 발췌',command=lambda a=articles,t=text:self.fetch_one(a,t))
-                btn.pack(anchor='w')
-                self.cards.append((articles,text))
-        self.status.configure(text=f'기사 {count}건을 {len(self.cards)}개 카드로 표시했습니다. 발췌 내용은 저장되지 않습니다.')
+        self._rebuild()
+        self.status.configure(text=f'기사 {count}건을 {len(self.cards)}개 카드로 표시했습니다. 목차를 추가·삭제·이동할 수 있습니다.')
+
+    def add_category(self):
+        if self.report_groups is None:
+            return
+        name=simple_input(self.root,'목차 추가','새 목차 이름을 입력하세요.')
+        if not name:
+            return
+        name=name.strip()
+        if not name:
+            return
+        if name in self.report_groups:
+            messagebox.showwarning('중복 목차','같은 이름의 목차가 이미 있습니다.')
+            return
+        self._save_visible_summaries()
+        self.report_groups[name]=OrderedDict()
+        self._rebuild()
+        self._select_category(name)
+
+    def rename_category(self, old):
+        if self.report_groups is None or old not in self.report_groups:
+            return
+        name=simple_input(self.root,'목차 이름 변경',f'새 이름을 입력하세요.\n현재: {old}')
+        if not name:
+            return
+        name=name.strip()
+        if not name or name==old:
+            return
+        if name in self.report_groups:
+            messagebox.showwarning('중복 목차','같은 이름의 목차가 이미 있습니다.')
+            return
+        self._save_visible_summaries()
+        new_groups=OrderedDict()
+        for category, groups in self.report_groups.items():
+            new_groups[name if category==old else category]=groups
+        self.report_groups=new_groups
+        new_summary={}
+        for (category,key), value in self.card_summary.items():
+            new_summary[(name if category==old else category,key)]=value
+        self.card_summary=new_summary
+        self._rebuild()
+        self._select_category(name)
+
+    def delete_category(self, category):
+        if self.report_groups is None or category not in self.report_groups:
+            return
+        if self.report_groups[category]:
+            messagebox.showwarning('삭제할 수 없음',f'「{category}」 목차에 기사가 있습니다.\n기사를 다른 목차로 이동한 후 삭제하세요.')
+            return
+        if len(self.report_groups)==1:
+            messagebox.showwarning('삭제할 수 없음','최소 하나의 목차는 있어야 합니다.')
+            return
+        if not messagebox.askyesno('목차 삭제',f'「{category}」 목차를 삭제하시겠습니까?'):
+            return
+        del self.report_groups[category]
+        self._rebuild()
+
+    def move_category(self, category, delta):
+        if self.report_groups is None:
+            return
+        names=list(self.report_groups.keys())
+        try: idx=names.index(category)
+        except ValueError: return
+        new_idx=idx+delta
+        if new_idx<0 or new_idx>=len(names): return
+        names[idx],names[new_idx]=names[new_idx],names[idx]
+        self.report_groups=OrderedDict((n,self.report_groups[n]) for n in names)
+        self._rebuild()
+        self._select_category(category)
+
+    def _select_category(self, category):
+        for tab_id in self.tabs.tabs():
+            if self.tabs.tab(tab_id,'text')==category:
+                self.tabs.select(tab_id); return
+
+    def move_article(self, source, key, target):
+        if source==target or target not in self.report_groups:
+            return
+        self._save_visible_summaries()
+        groups=self.report_groups[source]
+        if key not in groups:
+            return
+        articles=groups.pop(key)
+        self.report_groups[target][key]=articles
+        summary=self.card_summary.pop((source,key), '')
+        self.card_summary[(target,key)]=summary
+        self._rebuild()
+        self._select_category(target)
+        self.status.configure(text=f'기사를 「{source}」에서 「{target}」으로 이동했습니다.')
 
     def export_html(self):
         if self.report_groups is None:
             messagebox.showinfo('엑셀 선택', '먼저 기사 엑셀을 여세요.')
             return
+        self._save_visible_summaries()
         summaries={}
-        # self.cards follows CATEGORIES / OrderedDict group order from read_report.
-        card_iter=iter(self.cards)
-        for category in CATEGORIES:
-            for key in self.report_groups[category]:
-                _,widget=next(card_iter)
-                summaries[(category,key)]=widget.get('1.0','end-1c').strip()
+        for category, groups in self.report_groups.items():
+            for key in groups:
+                summaries[(category,key)]=self.card_summary.get((category,key),'')
         filename='중앙부처동향_'+datetime.now().strftime('%Y-%m-%d')+'.html'
         target=filedialog.asksaveasfilename(title='HTML 보고서 저장',defaultextension='.html',
                  initialfile=filename,filetypes=[('HTML 파일','*.html')])
@@ -753,8 +934,7 @@ class ReportApp:
         try:
             Path(target).write_text(report_html(self.report_groups,summaries),encoding='utf-8')
         except Exception as exc:
-            messagebox.showerror('저장 실패',str(exc))
-            return
+            messagebox.showerror('저장 실패',str(exc)); return
         self.status.configure(text=('발췌 진행 중 · 현재 결과를 저장했습니다: ' if self.busy else 'HTML 보고서를 저장했습니다: ')+target)
         messagebox.showinfo('저장 완료', ('진행 중 결과를 저장했습니다. 완료 후 다시 저장하면 최종 결과를 반영할 수 있습니다.\n' if self.busy else 'HTML 보고서를 저장했습니다. 파일을 브라우저에서 열 수 있습니다.\n')+target)
 
@@ -773,8 +953,7 @@ class ReportApp:
                     for article in articles:
                         url = (article.get('url') or '').strip()
                         if url and url not in tried:
-                            tried.add(url)
-                            candidates.append((article, url))
+                            tried.add(url); candidates.append((article, url))
                     for index, (article, url) in enumerate(candidates[:MAX_LINKS_PER_CARD], 1):
                         publisher = article.get('publisher') or '매체 미상'
                         self.events.put(('status', f'{n}/{len(tasks)}번 기사 · {publisher} 링크 {index}/{min(len(candidates), MAX_LINKS_PER_CARD)} 확인 중 (최대 {ARTICLE_DEADLINE}초)…', None))
@@ -798,42 +977,30 @@ class ReportApp:
             self.events.put(('done', None, None))
 
     def start(self, tasks):
-        if self.busy or not tasks:
-            return
-        self.busy = True
-        self.all_button.configure(state='disabled')
-        self.open_button.configure(state='disabled')
-        # HTML output is a snapshot and remains available during processing.
+        if self.busy or not tasks: return
+        self.busy=True
+        self.all_button.configure(state='disabled'); self.open_button.configure(state='disabled'); self.add_category_button.configure(state='disabled')
         self.export_button.configure(state='normal')
         self.status.configure(text=f'0/{len(tasks)}개 기사 처리 완료 · 첫 링크 확인 중…')
-        threading.Thread(target=self.worker, args=(tasks,), daemon=True).start()
+        threading.Thread(target=self.worker,args=(tasks,),daemon=True).start()
 
-    def fetch_one(self, articles, widget):
-        self.start([(articles, widget)])
-
-    def fetch_all(self):
-        self.start(self.cards.copy())
+    def fetch_one(self, articles, widget): self.start([(articles, widget)])
+    def fetch_all(self): self.start(self.cards.copy())
 
     def poll(self):
         while True:
-            try:
-                kind, a, b = self.events.get_nowait()
-            except queue.Empty:
-                break
-            if kind == 'article':
-                try:
-                    self.set_text(a, b)
-                except tk.TclError:
-                    pass
-            elif kind == 'status':
-                self.status.configure(text=a)
-            elif kind == 'done':
-                self.busy = False
-                self.open_button.configure(state='normal')
-                self.all_button.configure(state='normal')
-                self.export_button.configure(state='normal')
+            try: kind,a,b=self.events.get_nowait()
+            except queue.Empty: break
+            if kind=='article':
+                try: self.set_text(a,b)
+                except tk.TclError: pass
+            elif kind=='status': self.status.configure(text=a)
+            elif kind=='done':
+                self.busy=False
+                self.open_button.configure(state='normal'); self.all_button.configure(state='normal'); self.export_button.configure(state='normal')
+                if self.report_groups is not None: self.add_category_button.configure(state='normal')
                 self.status.configure(text='발췌 처리가 끝났습니다. 실패한 기사는 카드의 오류 문구를 확인해 주세요.')
-        self.root.after(100, self.poll)
+        self.root.after(100,self.poll)
 
 
 if __name__=='__main__':
