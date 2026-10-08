@@ -300,82 +300,226 @@ def safe_report_url(value):
 
 
 REPORT_SCRIPT = r"""
+
+const XLSX_STYLES = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" mc:Ignorable=\"x14ac x16r2 xr\" xmlns:x14ac=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac\" xmlns:x16r2=\"http://schemas.microsoft.com/office/spreadsheetml/2015/02/main\" xmlns:xr=\"http://schemas.microsoft.com/office/spreadsheetml/2014/revision\"><fonts count=\"6\" x14ac:knownFonts=\"1\"><font><sz val=\"11\"/><color theme=\"1\"/><name val=\"맑은 고딕\"/><family val=\"2\"/><scheme val=\"minor\"/></font><font><b/><sz val=\"22\"/><name val=\"맑은 고딕\"/><family val=\"3\"/><charset val=\"129\"/></font><font><sz val=\"10\"/><name val=\"맑은 고딕\"/><family val=\"3\"/><charset val=\"129\"/></font><font><b/><sz val=\"11\"/><name val=\"맑은 고딕\"/><family val=\"3\"/><charset val=\"129\"/></font><font><u/><sz val=\"10\"/><color rgb=\"FF0563C1\"/><name val=\"맑은 고딕\"/><family val=\"3\"/><charset val=\"129\"/></font><font><sz val=\"8\"/><name val=\"맑은 고딕\"/><family val=\"3\"/><charset val=\"129\"/><scheme val=\"minor\"/></font></fonts><fills count=\"3\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill><fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFBFBFBF\"/></patternFill></fill></fills><borders count=\"2\"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style=\"thin\"><color rgb=\"FF7F7F7F\"/></left><right style=\"thin\"><color rgb=\"FF7F7F7F\"/></right><top style=\"thin\"><color rgb=\"FF7F7F7F\"/></top><bottom style=\"thin\"><color rgb=\"FF7F7F7F\"/></bottom><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"8\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"3\" fillId=\"2\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\"/></xf><xf numFmtId=\"0\" fontId=\"3\" fillId=\"0\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\" wrapText=\"1\"/></xf><xf numFmtId=\"0\" fontId=\"4\" fillId=\"0\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\" wrapText=\"1\"/></xf><xf numFmtId=\"0\" fontId=\"2\" fillId=\"0\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\"/></xf><xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\"/></xf><xf numFmtId=\"0\" fontId=\"2\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf><xf numFmtId=\"0\" fontId=\"3\" fillId=\"0\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\" wrapText=\"1\"/></xf></cellXfs><cellStyles count=\"1\"><cellStyle name=\"표준\" xfId=\"0\" builtinId=\"0\"/></cellStyles><dxfs count=\"0\"/><tableStyles count=\"0\" defaultTableStyle=\"TableStyleMedium2\" defaultPivotStyle=\"PivotStyleLight16\"/><extLst><ext uri=\"{EB79DEF2-80B8-43e5-95BD-54CBDDF9020C}\" xmlns:x14=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main\"><x14:slicerStyles defaultSlicerStyle=\"SlicerStyleLight1\"/></ext><ext uri=\"{9260A510-F301-46a8-8635-F512D64BE5F5}\" xmlns:x15=\"http://schemas.microsoft.com/office/spreadsheetml/2010/11/main\"><x15:timelineStyles defaultTimelineStyle=\"TimeSlicerStyleLight1\"/></ext></extLst></styleSheet>";
+const xml = value => String(value == null ? '' : value).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+function safeLink(value) {
+  try {
+    const u = new URL(value);
+    return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password ? u.href : '';
+  } catch (_) { return ''; }
+}
+function zipFiles(files) {
+  const enc = new TextEncoder();
+  const crcTable = Array.from({length:256}, (_, n) => {
+    for (let k=0; k<8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1;
+    return n >>> 0;
+  });
+  const crc32 = data => {
+    let c = 0xffffffff;
+    for (const b of data) c = crcTable[(c ^ b) & 255] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const parts = [], directory = [];
+  let offset = 0, centralSize = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const path = enc.encode(name), data = enc.encode(content), crc = crc32(data);
+    const local = new Uint8Array(30 + path.length), lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x800, true); lv.setUint16(12, 33, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+    lv.setUint16(26, path.length, true); local.set(path, 30);
+    const central = new Uint8Array(46 + path.length), cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x800, true); cv.setUint16(14, 33, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+    cv.setUint16(28, path.length, true); cv.setUint32(42, offset, true); central.set(path, 46);
+    parts.push(local, data); directory.push(central);
+    offset += local.length + data.length; centralSize += central.length;
+  }
+  const end = new Uint8Array(22), ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, directory.length, true); ev.setUint16(10, directory.length, true);
+  ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+  return new Blob([...parts, ...directory, end], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function makeIssueXlsx(groups, dateValue) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? new Date(dateValue+'T12:00:00') : new Date();
+  const dateText = date.getFullYear()+'. '+(date.getMonth()+1)+'. '+date.getDate()+'. ('+'일월화수목금토'[date.getDay()]+')';
+  const cell = (ref, value, style) => '<c r="'+ref+'" s="'+style+'" t="inlineStr"><is><t xml:space="preserve">'+xml(value)+'</t></is></c>';
+  const row = (n, cells, height) => '<row r="'+n+'"'+(height == null ? '' : ' ht="'+height+'" customHeight="1"')+'>'+cells+'</row>';
+  const rows = [row(1, cell('A1','중앙부처 오늘의 이슈',5),44.1),row(2,cell('A2',dateText,6),null),row(3,cell('A3','부처명',1)+cell('B3','제목',1)+cell('C3','매체명',1),24)];
+  const merges = ['A1:C1','A2:C2'], links = [], rels = [];
+  let n = 4;
+  for (const group of groups) {
+    const start = n;
+    for (const item of group.items) {
+      rows.push(row(n,cell('A'+n,n===start?group.name:'',7)+cell('B'+n,item.title,3)+cell('C'+n,item.publisher,4),33.95));
+      const url = safeLink(item.url);
+      if (url) {
+        const id = 'rId'+(rels.length+1);
+        links.push('<hyperlink ref="B'+n+'" r:id="'+id+'"/>');
+        rels.push('<Relationship Id="'+id+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="'+xml(url)+'" TargetMode="External"/>');
+      }
+      n++;
+    }
+    if (n-start>1) merges.push('A'+start+':A'+(n-1));
+  }
+  const pre = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const files = {
+    '[Content_Types].xml':pre+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+    '_rels/.rels':pre+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    'xl/workbook.xml':pre+'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="오늘의 이슈" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels':pre+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+    'xl/styles.xml':XLSX_STYLES,
+    'xl/worksheets/sheet1.xml':pre+'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:C'+(n-1)+'"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="16.5"/><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="80" customWidth="1"/><col min="3" max="3" width="14" customWidth="1"/></cols><sheetData>'+rows.join('')+'</sheetData><mergeCells count="'+merges.length+'">'+merges.map(m=>'<mergeCell ref="'+m+'"/>').join('')+'</mergeCells>'+(links.length?'<hyperlinks>'+links.join('')+'</hyperlinks>':'')+'<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/><pageSetup orientation="portrait"/></worksheet>',
+    'xl/worksheets/_rels/sheet1.xml.rels':pre+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+rels.join('')+'</Relationships>'
+  };
+  return zipFiles(files);
+}
+
+
 (function () {
   'use strict';
-  const stateElement = document.getElementById('report-state');
-  const items = JSON.parse(stateElement.textContent);
+  const items = JSON.parse(document.getElementById('report-state').textContent);
   const cards = Array.from(document.querySelectorAll('[data-card]'));
-  function apply(card) {
-    const index = Number(card.getAttribute('data-card'));
-    const data = items[index];
-    const editor = card.querySelector('.edit-controls');
-    ['page', 'author', 'date', 'summary'].forEach(function (field) {
-      const input = editor.querySelector('[data-field="' + field + '"]');
-      data[field] = input.value.trim();
-    });
-    card.querySelector('[data-summary]').textContent = data.summary || '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.';
-    ['page', 'author', 'date'].forEach(function (field) {
-      const span = card.querySelector('[data-meta="' + field + '"]');
-      span.textContent = data[field];
-      span.hidden = !data[field];
-    });
-    editor.open = false;
+  const main = document.querySelector('main');
+  const status = message => { document.getElementById('save-status').textContent = message; };
+  const sections = () => Array.from(document.querySelectorAll('section.category'));
+  const nameOf = section => section.querySelector('h2').textContent;
+  const dataOf = card => items[Number(card.dataset.card)];
+  function button(label, action, parent) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+    b.addEventListener('click', action); parent.appendChild(b); return b;
   }
-  cards.forEach(function (card) {
-    card.querySelector('[data-apply]').addEventListener('click', function () {
-      apply(card);
-      document.getElementById('save-status').textContent = '수정이 화면에 반영되었습니다. 파일에도 남기려면 수정한 HTML 저장을 누르세요.';
+  function download(blob, filename) {
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    status('다운로드를 요청했습니다. 브라우저 다운로드 목록을 확인하세요.');
+  }
+  function apply(card) {
+    const d = dataOf(card);
+    card.querySelectorAll('[data-field]').forEach(input => { d[input.dataset.field] = input.value.trim(); });
+    const title = card.querySelector('.article-title'); title.textContent = '';
+    const url = safeLink(d.url);
+    if (url) {
+      const a = document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=d.title; title.appendChild(a);
+    } else { title.textContent=d.title; }
+    const heading = card.closest('.theme-group').querySelector('.theme-title');
+    if (heading.firstChild && heading.firstChild.nodeType===3) heading.firstChild.textContent=d.title;
+    card.querySelector('.media').textContent = d.publisher;
+    ['page','author','date'].forEach(field => {
+      const span = card.querySelector('[data-meta="'+field+'"]'); span.textContent=d[field]; span.hidden=!d[field];
     });
-  });
-  document.getElementById('save-html').addEventListener('click', function () {
-    cards.forEach(function (card) {
-      if (card.querySelector('.edit-controls').open) apply(card);
-    });
-    const clone = document.documentElement.cloneNode(true);
-    clone.querySelector('#report-state').textContent = JSON.stringify(items).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
-    clone.querySelectorAll('[data-card]').forEach(function (card, index) {
-      const data = items[index];
-      card.querySelector('[data-summary]').textContent = data.summary || '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.';
-      ['page', 'author', 'date'].forEach(function (field) {
-        const span = card.querySelector('[data-meta="' + field + '"]');
-        span.textContent = data[field];
-        span.hidden = !data[field];
-        card.querySelector('[data-field="' + field + '"]').setAttribute('value', data[field]);
+    card.querySelector('[data-summary]').textContent=d.summary || '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.';
+  }
+  function refresh() {
+    const all=sections();
+    all.forEach((section,index) => {
+      const count=section.querySelectorAll('[data-card]').length;
+      section.querySelector('.badge').textContent=count+'개 대표 기사';
+      section.querySelectorAll('.empty').forEach(e=>e.remove());
+      section.querySelectorAll('[data-card]').forEach(card => { dataOf(card).category=nameOf(section); });
+      section.querySelectorAll('[data-move-select]').forEach(select => {
+        select.replaceChildren();
+        all.forEach((target,i) => { const o=document.createElement('option'); o.value=String(i); o.textContent=nameOf(target); select.appendChild(o); });
+        select.value=String(index);
       });
-      card.querySelector('[data-field="summary"]').textContent = data.summary;
-      card.querySelector('.edit-controls').removeAttribute('open');
     });
-    clone.querySelector('#save-status').textContent = '저장된 보고서입니다. 내용을 바꾼 뒤 다시 저장할 수 있습니다.';
-    const blob = new Blob(['<!DOCTYPE html>\n' + clone.outerHTML], {type:'text/html;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = '중앙부처동향_수정본.html';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
-    document.getElementById('save-status').textContent = '수정본을 다운로드했습니다. 브라우저 다운로드 목록에서 파일을 확인하세요.';
+  }
+  function setupSection(section) {
+    const controls=document.createElement('div'); controls.className='dynamic-tools';
+    const header=section.querySelector('.category-header'); header.appendChild(controls);
+    button('이름 변경', () => {
+      const name=prompt('목차 이름을 입력하세요.',nameOf(section));
+      if (!name || !name.trim()) return;
+      if (sections().some(s=>s!==section && nameOf(s)===name.trim())) { alert('같은 이름의 목차가 있습니다.'); return; }
+      section.querySelector('h2').textContent=name.trim(); refresh();
+    }, controls);
+    button('목차 위로', () => { const prev=section.previousElementSibling; if (prev && prev.matches('section.category')) { main.insertBefore(section,prev); refresh(); } },controls);
+    button('목차 아래로', () => { const next=section.nextElementSibling; if (next && next.matches('section.category')) { main.insertBefore(next,section); refresh(); } },controls);
+    button('빈 목차 삭제', () => { if (section.querySelector('[data-card]')) { alert('기사를 다른 목차로 먼저 옮겨주세요.'); return; } section.remove(); refresh(); },controls);
+  }
+  cards.forEach(card => {
+    const d=dataOf(card);
+    // Existing reports store the article metadata in HTML, not the JSON state.
+    if (d.title===undefined) d.title=card.querySelector('.article-title').textContent.trim();
+    if (d.publisher===undefined) d.publisher=card.querySelector('.media').textContent.trim();
+    if (d.url===undefined) d.url=card.querySelector('.article-title a')?.getAttribute('href') || '';
+    const grid=card.querySelector('.edit-grid');
+    [['title','기사 제목'],['publisher','매체명'],['url','원문 URL']].forEach(([field,label]) => {
+      if (grid.querySelector('[data-field="'+field+'"]')) return;
+      const l=document.createElement('label'), input=document.createElement('input');
+      l.textContent=label; input.dataset.field=field; input.value=d[field] || ''; l.appendChild(input); grid.appendChild(l);
+    });
+    card.querySelector('[data-apply]').addEventListener('click', () => { apply(card); card.querySelector('details').open=false; status('수정 사항을 반영했습니다. 파일에 남기려면 HTML을 저장하세요.'); });
+    const controls=document.createElement('div'); controls.className='dynamic-tools'; card.appendChild(controls);
+    button('기사 위로', () => { const group=card.closest('.theme-group'), prev=group.previousElementSibling; if(prev && prev.matches('.theme-group')) group.parentNode.insertBefore(group,prev); },controls);
+    button('기사 아래로', () => { const group=card.closest('.theme-group'), next=group.nextElementSibling; if(next && next.matches('.theme-group')) group.parentNode.insertBefore(next,group); },controls);
+    const select=document.createElement('select'); select.dataset.moveSelect=''; select.setAttribute('aria-label','이동할 목차'); controls.appendChild(select);
+    button('목차로 이동', () => { const target=sections()[Number(select.value)]; if(target) target.appendChild(card.closest('.theme-group')); refresh(); },controls);
   });
+  sections().forEach(setupSection);
+  const toolbar=document.querySelector('.toolbar');
+  button('목차 추가', () => {
+    const name=prompt('새 목차 이름을 입력하세요.'); if(!name || !name.trim()) return;
+    if(sections().some(s=>nameOf(s)===name.trim())) { alert('같은 이름의 목차가 있습니다.'); return; }
+    const section=document.createElement('section'); section.className='category';
+    const header=document.createElement('div'); header.className='category-header';
+    const h=document.createElement('h2'); h.textContent=name.trim();
+    const badge=document.createElement('span'); badge.className='badge'; header.append(h,badge); section.appendChild(header);
+    main.insertBefore(section,main.querySelector('footer')); setupSection(section); refresh();
+  },toolbar).classList.add('runtime-button');
+  button('엑셀로 내보내기', () => {
+    try {
+      cards.forEach(apply); refresh();
+      const groups=sections().map(section=>({name:nameOf(section),items:Array.from(section.querySelectorAll('[data-card]')).map(dataOf)}));
+      const date=document.getElementById('report-date').value;
+      if(!date) { alert('보고서 날짜를 입력하세요.'); return; }
+      download(makeIssueXlsx(groups,date),'중앙부처_오늘의이슈_'+date+'.xlsx');
+    } catch (e) { status('엑셀 저장 실패: '+e.message); alert('엑셀 저장 실패: '+e.message); }
+  },toolbar).classList.add('runtime-button');
+  document.getElementById('save-html').addEventListener('click', () => {
+    try {
+      cards.forEach(apply); refresh();
+      const clone=document.documentElement.cloneNode(true);
+      clone.querySelector('#report-state').textContent=JSON.stringify(items).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
+      // Serialize every live form value; card IDs stay stable after DOM moves.
+      document.querySelectorAll('[data-card]').forEach(card => {
+        const target=clone.querySelector('[data-card="'+card.dataset.card+'"]');
+        card.querySelectorAll('[data-field]').forEach(input => {
+          const copy=target.querySelector('[data-field="'+input.dataset.field+'"]');
+          if(input.tagName==='TEXTAREA') copy.textContent=input.value; else copy.setAttribute('value',input.value);
+        });
+        target.querySelector('details').removeAttribute('open');
+      });
+      clone.querySelector('#report-date').setAttribute('value',document.getElementById('report-date').value);
+      clone.querySelectorAll('.dynamic-tools,.runtime-button').forEach(e=>e.remove());
+      clone.querySelector('#save-status').textContent='저장된 보고서입니다. 편집 후 다시 저장할 수 있습니다.';
+      download(new Blob(['<!DOCTYPE html>\n'+clone.outerHTML],{type:'text/html;charset=utf-8'}),'중앙부처동향_'+document.getElementById('report-date').value+'_편집본.html');
+    } catch(e) { status('HTML 저장 실패: '+e.message); alert('HTML 저장 실패: '+e.message); }
+  });
+  refresh();
 }());
-"""
 
+"""
 
 def report_html(report_groups, summaries, generated_at=None):
     """Offline editable report in the supplied grouped article-card style."""
     esc = lambda value: html.escape(str(value or ''), quote=True)
     now = generated_at or datetime.now().strftime('%Y-%m-%d %H:%M')
-    count = sum(len(articles) for cat in CATEGORIES for articles in report_groups.get(cat, {}).values())
-    cards = sum(len(report_groups.get(cat, {})) for cat in CATEGORIES)
+    categories = list(report_groups)
+    count = sum(len(articles) for cat in categories for articles in report_groups.get(cat, {}).values())
+    cards = sum(len(report_groups.get(cat, {})) for cat in categories)
     pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
-              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE,
+              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
               '<header><h1>중앙부처동향</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
-              '<div class="toolbar"><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
+              '<div class="toolbar"><label>보고서 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
               '<p class="note">본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요. 지면·기자·날짜는 엑셀에 해당 열이 있을 때만 표시됩니다.</p>']
     data = []
-    for cat in CATEGORIES:
+    for cat in categories:
         groups = report_groups.get(cat, {})
         pieces.extend(['<section class="category"><div class="category-header"><h2>',esc(cat),
                        '</h2><span class="badge">',str(sum(len(v) for v in groups.values())),'건</span></div>'])
