@@ -292,7 +292,7 @@ h1{font-size:23px;margin:0}header p{margin:3px 0 0;font-size:12px;color:#dbeafe}
 h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#2563a4}
 .theme-group{border:1px solid var(--border);background:#fff;border-radius:9px;margin:10px 0;overflow:hidden}
 .theme-title{font-weight:700;background:#edf3f9;color:var(--primary);padding:10px 15px}
-.group-media{font-weight:400;font-size:11px;color:#62748c;margin-left:10px}
+.group-media{font-weight:400;font-size:11px;color:#62748c;margin-left:10px;display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px}
 .article{padding:11px 15px 14px;border-top:1px solid var(--border)}
 .article-title{font-weight:700;margin:0 0 5px}.article-title a{color:#172e4b;text-decoration:none}.article-title a:hover{text-decoration:underline}
 .article-meta{display:flex;gap:8px;flex-wrap:wrap;color:#607494;font-size:11px;margin-bottom:8px}.article-meta .media{color:#235e9d;font-weight:700}
@@ -504,6 +504,77 @@ function makeReportHwpx(groups, dateValue) {
     });
     card.querySelector('[data-summary]').textContent=d.summary || '요약 미입력 — 내용을 확인한 후 요약을 입력하세요.';
   }
+
+  function renderRelated(card) {
+    const d=dataOf(card), heading=card.closest('.theme-group').querySelector('.theme-title');
+    heading.querySelectorAll('.group-media').forEach(n=>n.remove());
+    if (!Array.isArray(d.related)) d.related=[];
+    if (!d.related.length) return;
+    const wrap=document.createElement('span'); wrap.className='group-media';
+    wrap.appendChild(document.createTextNode('함께 보도한 매체: '));
+    d.related.forEach((r,i)=>{
+      if(i) wrap.appendChild(document.createTextNode(' · '));
+      const label=document.createElement('span'); label.textContent=(r.publisher ? '<'+r.publisher+'> ' : '')+r.title;
+      wrap.appendChild(label);
+      const out=document.createElement('button'); out.type='button'; out.textContent='빼기'; out.title='이 기사를 묶음에서 분리';
+      out.style.cssText='padding:1px 5px;margin-left:3px;font-size:10px';
+      out.addEventListener('click',()=>{ d.related.splice(i,1); const fresh={...r,summary:'',related:[],category:d.category}; items.push(fresh);
+        const source=card.closest('.theme-group'), clone=source.cloneNode(true), newCard=clone.querySelector('[data-card]');
+        newCard.dataset.card=String(items.length-1);
+        newCard.querySelector('.article-title').textContent=fresh.title||'';
+        newCard.querySelector('.media').textContent=fresh.publisher||'';
+        newCard.querySelector('[data-summary]').textContent='요약 미입력 — 요약을 입력하세요.';
+        ['page','author','date'].forEach(f=>{const sp=newCard.querySelector('[data-meta="'+f+'"]');sp.textContent=fresh[f]||'';sp.hidden=!fresh[f];});
+        newCard.querySelectorAll('[data-field]').forEach(inp=>{inp.value=fresh[inp.dataset.field]||'';});
+        const h=clone.querySelector('.theme-title'); h.textContent=fresh.title||'';
+        clone.querySelectorAll('.dynamic-tools,.group-media').forEach(n=>n.remove());
+        source.parentNode.insertBefore(clone,source.nextSibling);
+        wireNewCard(newCard);
+        newCard.querySelector('[data-apply]').addEventListener('click',()=>{apply(newCard);newCard.querySelector('details').open=false;});
+        renderRelated(newCard); renderRelated(card); refresh(); status('기사를 묶음에서 분리했습니다.');
+      });
+      wrap.appendChild(out);
+    });
+    heading.appendChild(wrap);
+  }
+  function makeStandaloneFromData(r, section, afterGroup) {
+    const template=section.querySelector('[data-card]');
+    if(!template) return;
+    const fresh={...r,summary:r.summary||'',related:Array.isArray(r.related)?r.related:[],category:nameOf(section)};
+    items.push(fresh);
+    const clone=template.closest('.theme-group').cloneNode(true);
+    const c=clone.querySelector('[data-card]'); c.dataset.card=String(items.length-1);
+    const title=c.querySelector('.article-title'); title.textContent=fresh.title||'';
+    const url=safeLink(fresh.url); if(url){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=fresh.title||'';title.appendChild(a);}
+    c.querySelector('.media').textContent=fresh.publisher||'';
+    c.querySelector('[data-summary]').textContent=fresh.summary||'요약 미입력 — 요약을 입력하세요.';
+    ['page','author','date'].forEach(f=>{const sp=c.querySelector('[data-meta="'+f+'"]');sp.textContent=fresh[f]||'';sp.hidden=!fresh[f];});
+    c.querySelectorAll('[data-field]').forEach(inp=>inp.value=fresh[inp.dataset.field]||'');
+    clone.querySelector('.theme-title').textContent=fresh.title||'';
+    afterGroup.parentNode.insertBefore(clone,afterGroup.nextSibling);
+    clone.querySelectorAll('.dynamic-tools,.group-media').forEach(n=>n.remove());
+    wireNewCard(c);
+    c.querySelector('[data-apply]').addEventListener('click',()=>{apply(c);c.querySelector('details').open=false;});
+    renderRelated(c); return clone;
+  }
+  function wireNewCard(card) {
+    const controls=document.createElement('div'); controls.className='dynamic-tools'; card.appendChild(controls);
+    button('기사 묶기',()=>mergePrompt(card),controls);
+    button('기사 위로',()=>{const g=card.closest('.theme-group'),p=g.previousElementSibling;if(p&&p.matches('.theme-group'))g.parentNode.insertBefore(g,p);},controls);
+    button('기사 아래로',()=>{const g=card.closest('.theme-group'),n=g.nextElementSibling;if(n&&n.matches('.theme-group'))g.parentNode.insertBefore(n,g);},controls);
+  }
+  function mergePrompt(card) {
+    const source=dataOf(card), candidates=Array.from(document.querySelectorAll('[data-card]')).filter(c=>c!==card && c.closest('section.category')===card.closest('section.category'));
+    if(!candidates.length){alert('같은 목차에 묶을 다른 기사가 없습니다.');return;}
+    const menu=candidates.map((c,i)=>(i+1)+'. '+(dataOf(c).title||c.querySelector('.article-title').textContent.trim())).join('\n');
+    const answer=prompt('어느 기사에 묶을까요? 번호를 입력하세요.\n'+menu);
+    const n=Number(answer)-1; if(!Number.isInteger(n)||n<0||n>=candidates.length)return;
+    const target=candidates[n], td=dataOf(target);
+    if(!Array.isArray(td.related))td.related=[];
+    td.related.push({title:source.title,publisher:source.publisher,url:source.url,page:source.page||'',author:source.author||'',date:source.date||'',summary:source.summary||''});
+    const group=card.closest('.theme-group'); group.remove(); renderRelated(target); refresh();
+    status('기사를 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
+  }
   function refresh() {
     const all=sections();
     all.forEach((section,index) => {
@@ -545,10 +616,12 @@ function makeReportHwpx(groups, dateValue) {
     });
     card.querySelector('[data-apply]').addEventListener('click', () => { apply(card); card.querySelector('details').open=false; status('수정 사항을 반영했습니다. 파일에 남기려면 HTML을 저장하세요.'); });
     const controls=document.createElement('div'); controls.className='dynamic-tools'; card.appendChild(controls);
+    button('기사 묶기', () => mergePrompt(card),controls);
     button('기사 위로', () => { const group=card.closest('.theme-group'), prev=group.previousElementSibling; if(prev && prev.matches('.theme-group')) group.parentNode.insertBefore(group,prev); },controls);
     button('기사 아래로', () => { const group=card.closest('.theme-group'), next=group.nextElementSibling; if(next && next.matches('.theme-group')) group.parentNode.insertBefore(next,group); },controls);
     const select=document.createElement('select'); select.dataset.moveSelect=''; select.setAttribute('aria-label','이동할 목차'); controls.appendChild(select);
     button('목차로 이동', () => { const target=sections()[Number(select.value)]; if(target) target.appendChild(card.closest('.theme-group')); refresh(); },controls);
+    renderRelated(card);
   });
   sections().forEach(setupSection);
   const toolbar=document.querySelector('.toolbar');
@@ -563,7 +636,7 @@ function makeReportHwpx(groups, dateValue) {
   },toolbar).classList.add('runtime-button');
   button('엑셀로 내보내기', () => {
     try {
-      cards.forEach(apply); refresh();
+      document.querySelectorAll("[data-card]").forEach(apply); refresh();
       const groups=sections().map(section=>({name:nameOf(section),items:Array.from(section.querySelectorAll('[data-card]')).map(dataOf)}));
       const date=document.getElementById('report-date').value;
       if(!date) { alert('보고서 날짜를 입력하세요.'); return; }
@@ -573,7 +646,7 @@ function makeReportHwpx(groups, dateValue) {
 
   button('한글(HWPX)로 내보내기', () => {
     try {
-      cards.forEach(apply);
+      document.querySelectorAll("[data-card]").forEach(apply);
       refresh();
       const groups = sections().map(section => ({
         name: nameOf(section),
@@ -590,7 +663,7 @@ function makeReportHwpx(groups, dateValue) {
 
   document.getElementById('save-html').addEventListener('click', () => {
     try {
-      cards.forEach(apply); refresh();
+      document.querySelectorAll("[data-card]").forEach(apply); refresh();
       const clone=document.documentElement.cloneNode(true);
       clone.querySelector('#report-state').textContent=JSON.stringify(items).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
       // Serialize every live form value; card IDs stay stable after DOM moves.
