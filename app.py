@@ -292,7 +292,7 @@ h1{font-size:23px;margin:0}header p{margin:3px 0 0;font-size:12px;color:#dbeafe}
 h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#2563a4}
 .theme-group{border:1px solid var(--border);background:#fff;border-radius:9px;margin:10px 0;overflow:hidden}
 .theme-title{font-weight:700;background:#edf3f9;color:var(--primary);padding:10px 15px}
-.group-media{font-weight:400;font-size:11px;color:#62748c;margin-left:10px;display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px}
+.group-media{font-weight:400;font-size:11px;color:#62748c;margin:5px 0 0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}.group-media-label{display:block}.group-media-item{display:flex;align-items:center;gap:5px;margin-left:8px}.group-media-item a{color:#235e9d;text-decoration:none;font-weight:400}.group-media-item a:hover{text-decoration:underline}
 .article{padding:11px 15px 14px;border-top:1px solid var(--border)}
 .article-title{font-weight:700;margin:0 0 5px}.article-title a{color:#172e4b;text-decoration:none}.article-title a:hover{text-decoration:underline}
 .article-meta{display:flex;gap:8px;flex-wrap:wrap;color:#607494;font-size:11px;margin-bottom:8px}.article-meta .media{color:#235e9d;font-weight:700}
@@ -301,7 +301,7 @@ h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#256
 .edit label{display:block;color:#607494;font-size:11px}.edit input,.edit textarea{display:block;width:100%;padding:7px;border:1px solid #becddd;border-radius:4px;color:#203654;font:13px 'Malgun Gothic',sans-serif}
 .edit textarea{min-height:100px;resize:vertical;margin-top:3px}.edit .summary-label{margin:9px 0}.edit button{margin-top:5px}
 .empty{color:var(--muted);font-size:12px}.note{color:#607494;font-size:11px;margin:14px 0}footer{color:#607494;font-size:11px;margin-top:20px}
-@media(max-width:600px){.toolbar{flex-wrap:wrap}.edit-grid{grid-template-columns:1fr}.group-media{display:block;margin:2px 0 0}}
+@media(max-width:600px){.toolbar{flex-wrap:wrap}.edit-grid{grid-template-columns:1fr}.group-media{display:flex;margin:5px 0 0}}
 @media print{body{background:white}.toolbar,.edit-controls{display:none!important}.theme-group{break-inside:avoid}header{print-color-adjust:exact}}
 """
 
@@ -510,14 +510,18 @@ function makeReportHwpx(groups, dateValue) {
     heading.querySelectorAll('.group-media').forEach(n=>n.remove());
     if (!Array.isArray(d.related)) d.related=[];
     if (!d.related.length) return;
-    const wrap=document.createElement('span'); wrap.className='group-media';
-    wrap.appendChild(document.createTextNode('함께 보도한 매체: '));
+    const wrap=document.createElement('div'); wrap.className='group-media';
+    const caption=document.createElement('span'); caption.className='group-media-label'; caption.textContent='함께 보도한 매체:'; wrap.appendChild(caption);
     d.related.forEach((r,i)=>{
-      if(i) wrap.appendChild(document.createTextNode(' · '));
-      const label=document.createElement('span'); label.textContent=(r.publisher ? '<'+r.publisher+'> ' : '')+r.title;
-      wrap.appendChild(label);
+      const row=document.createElement('div'); row.className='group-media-item';
+      const label=document.createElement('span');
+      const text=(r.publisher ? '<'+r.publisher+'> ' : '')+r.title;
+      const relatedUrl=safeLink(r.url);
+      if(relatedUrl){const a=document.createElement('a');a.href=relatedUrl;a.target='_blank';a.rel='noopener noreferrer';a.textContent=text;label.appendChild(a);}
+      else label.textContent=text;
+      row.appendChild(label);
       const out=document.createElement('button'); out.type='button'; out.textContent='빼기'; out.title='이 기사를 묶음에서 분리';
-      out.style.cssText='padding:1px 5px;margin-left:3px;font-size:10px';
+      out.style.cssText='padding:1px 5px;font-size:10px;flex-shrink:0';
       out.addEventListener('click',()=>{ d.related.splice(i,1); const fresh={...r,summary:'',related:[],category:d.category}; items.push(fresh);
         const source=card.closest('.theme-group'), clone=source.cloneNode(true), newCard=clone.querySelector('[data-card]');
         newCard.dataset.card=String(items.length-1);
@@ -533,7 +537,7 @@ function makeReportHwpx(groups, dateValue) {
         newCard.querySelector('[data-apply]').addEventListener('click',()=>{apply(newCard);newCard.querySelector('details').open=false;});
         renderRelated(newCard); renderRelated(card); refresh(); status('기사를 묶음에서 분리했습니다.');
       });
-      wrap.appendChild(out);
+      row.appendChild(out); wrap.appendChild(row);
     });
     heading.appendChild(wrap);
   }
@@ -718,8 +722,24 @@ def report_html(report_groups, summaries, generated_at=None):
                     others_names.append(name)
                     seen.add(media_key(name))
             pieces.extend(['<div class="theme-group"><div class="theme-title">',esc(first['title'])])
-            if others_names:
-                pieces.extend(['<span class="group-media">함께 보도한 매체: ',esc(' · '.join(others_names)),'</span>'])
+            if others:
+                pieces.append('<div class="group-media"><span class="group-media-label">함께 보도한 매체:</span>')
+                seen_related = set()
+                for related_article in others:
+                    publisher_name = related_article.get('publisher','')
+                    if publisher_name and media_key(publisher_name) in seen_related:
+                        continue
+                    if publisher_name:
+                        seen_related.add(media_key(publisher_name))
+                    related_label = ('<' + publisher_name + '> ' if publisher_name else '') + str(related_article.get('title','') or '')
+                    related_url = safe_report_url(related_article.get('url'))
+                    pieces.append('<div class="group-media-item"><span>')
+                    if related_url:
+                        pieces.extend(['<a href="',esc(related_url),'" target="_blank" rel="noopener noreferrer">',esc(related_label),'</a>'])
+                    else:
+                        pieces.append(esc(related_label))
+                    pieces.append('</span></div>')
+                pieces.append('</div>')
             pieces.extend(['</div><article class="article" data-card="',str(len(data)),'"><div class="article-title">'])
             link = safe_report_url(first.get('url'))
             if link:
