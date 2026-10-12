@@ -301,7 +301,7 @@ h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#256
 .edit label{display:block;color:#607494;font-size:11px}.edit input,.edit textarea{display:block;width:100%;padding:7px;border:1px solid #becddd;border-radius:4px;color:#203654;font:13px 'Malgun Gothic',sans-serif}
 .edit textarea{min-height:100px;resize:vertical;margin-top:3px}.edit .summary-label{margin:9px 0}.edit button{margin-top:5px}
 .empty{color:var(--muted);font-size:12px}.note{color:#607494;font-size:11px;margin:14px 0}footer{color:#607494;font-size:11px;margin-top:20px}
-.merge-hint{font-size:11px;color:#607494;flex-basis:100%;padding-left:2px}.merge-dialog-backdrop{position:fixed;inset:0;background:rgba(15,30,50,.45);z-index:3000;display:flex;align-items:center;justify-content:center;padding:18px}
+.merge-hint{font-size:11px;color:#607494;flex:0 0 auto;white-space:nowrap;padding-left:2px}.merge-dialog-backdrop{position:fixed;inset:0;background:rgba(15,30,50,.45);z-index:3000;display:flex;align-items:center;justify-content:center;padding:18px}
 .merge-dialog{background:#fff;border-radius:12px;border:1px solid var(--border);box-shadow:0 15px 45px rgba(0,0,0,.25);width:min(620px,100%);max-height:80vh;display:flex;flex-direction:column;overflow:hidden}
 .merge-dialog-head{padding:16px 18px;border-bottom:1px solid var(--border)}.merge-dialog-head h3{margin:0;color:var(--primary);font-size:16px}.merge-dialog-head p{margin:4px 0 0;color:#607494;font-size:12px}
 .merge-candidates{padding:10px 14px;overflow:auto}.merge-candidate{display:flex;align-items:flex-start;gap:10px;padding:11px;border:1px solid var(--border);border-radius:8px;margin:6px 0;cursor:pointer}.merge-candidate:hover{background:#f4f8fc;border-color:#8baed4}.merge-candidate input{margin-top:4px;flex-shrink:0}.merge-candidate strong{display:block;font-size:13px;color:var(--primary)}.merge-candidate small{display:block;color:#607494;margin-top:3px;font-size:11px}
@@ -698,7 +698,7 @@ function makeReportHwpx(groups, dateValue) {
   sections().forEach(setupSection);
   const toolbar=document.querySelector('.toolbar');
   const selectionTools=document.createElement('span'); selectionTools.className='runtime-button selection-tools';
-  selectionTools.style.cssText='display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap';
+  selectionTools.style.cssText='display:inline-flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;min-width:max-content';
   const selectionCount=document.createElement('strong'); selectionCount.id='selection-count'; selectionCount.textContent='① 묶을 기사 체크: 0개';
   selectionTools.appendChild(selectionCount);
   const mergeButton=button('② 체크한 기사 묶기', mergeSelected, selectionTools);
@@ -845,7 +845,7 @@ def report_html(report_groups, summaries, generated_at=None):
     cards = sum(len(report_groups.get(cat, {})) for cat in categories)
     pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
-              '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.category-header{flex-wrap:wrap}.toolbar{flex-wrap:nowrap}.toolbar>label{white-space:nowrap}.toolbar #save-status{white-space:nowrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
+              '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.category-header{flex-wrap:wrap}.toolbar{flex-wrap:wrap;align-items:center}.toolbar>label{white-space:nowrap}.toolbar #save-status{white-space:nowrap;flex:1 1 auto}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools{display:inline-flex;flex-wrap:nowrap;align-items:center;white-space:nowrap;gap:8px;min-width:max-content}.merge-hint{flex:0 0 auto;white-space:nowrap}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
               '<header><h1>기사요약기</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
               '<div class="toolbar"><label>기사요약 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
