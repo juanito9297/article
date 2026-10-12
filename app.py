@@ -286,8 +286,8 @@ REPORT_STYLE = """
 .container{max-width:960px;margin:0 auto;padding:18px 16px 46px}
 header{background:var(--primary);color:white;border-radius:8px;padding:17px 18px;margin-bottom:14px}
 h1{font-size:21px;margin:0}header p{margin:3px 0 0;font-size:11px;color:#dbeafe}
-.toolbar{display:flex;align-items:center;gap:9px;background:white;border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:13px;font-size:12px}
-.toolbar p{margin:0;flex:1;color:#52647c;font-size:11px}button{font:12px 'Malgun Gothic',sans-serif;cursor:pointer;border:1px solid #b9c8da;border-radius:5px;background:white;color:var(--primary);padding:4px 8px}button:hover{background:#eff6ff}
+.toolbar{position:sticky;top:0;z-index:1000;display:flex;align-items:center;gap:9px;background:white;border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:13px;font-size:12px;box-shadow:0 3px 10px rgba(26,54,93,.12)}
+.toolbar p{margin:0;flex:1;color:#52647c;font-size:11px}.export-tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:4px 6px;border:1px solid #d7e1ed;border-radius:6px;background:#f7fafc;flex-shrink:0}.export-tools-label{font-size:11px;font-weight:700;color:#52647c;white-space:nowrap;padding:0 3px}button{font:12px 'Malgun Gothic',sans-serif;cursor:pointer;border:1px solid #b9c8da;border-radius:5px;background:white;color:var(--primary);padding:4px 8px}button:hover{background:#eff6ff}
 .category{margin:18px 0}.category-header{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--primary);margin:0 0 12px;padding:4px 0}
 h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#2563a4}
 .theme-group{border:1px solid var(--border);background:#fff;border-radius:9px;margin:10px 0;overflow:hidden}
@@ -301,8 +301,13 @@ h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#256
 .edit label{display:block;color:#607494;font-size:11px}.edit input,.edit textarea{display:block;width:100%;padding:7px;border:1px solid #becddd;border-radius:4px;color:#203654;font:13px 'Malgun Gothic',sans-serif}
 .edit textarea{min-height:100px;resize:vertical;margin-top:3px}.edit .summary-label{margin:9px 0}.edit button{margin-top:5px}
 .empty{color:var(--muted);font-size:12px}.note{color:#607494;font-size:11px;margin:14px 0}footer{color:#607494;font-size:11px;margin-top:20px}
+.merge-hint{font-size:11px;color:#607494;flex-basis:100%;padding-left:2px}.merge-dialog-backdrop{position:fixed;inset:0;background:rgba(15,30,50,.45);z-index:3000;display:flex;align-items:center;justify-content:center;padding:18px}
+.merge-dialog{background:#fff;border-radius:12px;border:1px solid var(--border);box-shadow:0 15px 45px rgba(0,0,0,.25);width:min(620px,100%);max-height:80vh;display:flex;flex-direction:column;overflow:hidden}
+.merge-dialog-head{padding:16px 18px;border-bottom:1px solid var(--border)}.merge-dialog-head h3{margin:0;color:var(--primary);font-size:16px}.merge-dialog-head p{margin:4px 0 0;color:#607494;font-size:12px}
+.merge-candidates{padding:10px 14px;overflow:auto}.merge-candidate{display:flex;align-items:flex-start;gap:10px;padding:11px;border:1px solid var(--border);border-radius:8px;margin:6px 0;cursor:pointer}.merge-candidate:hover{background:#f4f8fc;border-color:#8baed4}.merge-candidate input{margin-top:4px;flex-shrink:0}.merge-candidate strong{display:block;font-size:13px;color:var(--primary)}.merge-candidate small{display:block;color:#607494;margin-top:3px;font-size:11px}
+.merge-dialog-actions{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border);background:#f8fafc}.merge-dialog-actions .primary{background:var(--primary);color:white;border-color:var(--primary)}.merge-dialog-actions .primary:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:600px){.toolbar{flex-wrap:wrap}.edit-grid{grid-template-columns:1fr}.group-media{display:flex;margin:5px 0 0}}
-@media print{body{background:white}.toolbar,.edit-controls,.dynamic-tools,.selection-tools,button,select,input,.note,footer{display:none!important}.container{max-width:none;padding:0}.theme-group{break-inside:avoid;page-break-inside:avoid}header{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+@media print{body{background:white}.toolbar,.edit-controls,.dynamic-tools,.selection-tools,.export-tools,button,select,input,.note,footer{display:none!important}.container{max-width:none;padding:0}.theme-group{break-inside:avoid;page-break-inside:avoid}header{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
 """
 
 
@@ -571,14 +576,14 @@ function makeReportHwpx(groups, dateValue) {
     const selected=Array.from(document.querySelectorAll('[data-group-select]:checked'));
     const count=document.getElementById('selection-count');
     const mergeButton=document.getElementById('merge-selected-button');
-    if(count) count.textContent='선택한 기사: '+selected.length+'개';
+    if(count) count.textContent='① 묶을 기사 체크: '+selected.length+'개';
     if(mergeButton) mergeButton.disabled=selected.length<2;
   }
   function addSelectCheckbox(card, controls) {
     const label=document.createElement('label'); label.className='article-select-label';
     const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.groupSelect=''; cb.setAttribute('aria-label','기사 묶기 선택');
     cb.addEventListener('change',updateSelectionUI);
-    label.append(cb,document.createTextNode(' 묶기 선택')); controls.appendChild(label);
+    label.append(cb,document.createTextNode(' 묶을 기사 선택')); controls.appendChild(label);
   }
   function wireNewCard(card) {
     const controls=document.createElement('div'); controls.className='dynamic-tools'; card.appendChild(controls);
@@ -590,14 +595,38 @@ function makeReportHwpx(groups, dateValue) {
   function mergePrompt(card) {
     const source=dataOf(card), candidates=Array.from(document.querySelectorAll('[data-card]')).filter(c=>c!==card && c.closest('section.category')===card.closest('section.category'));
     if(!candidates.length){alert('같은 목차에 묶을 다른 기사가 없습니다.');return;}
-    const menu=candidates.map((c,i)=>(i+1)+'. '+(dataOf(c).title||c.querySelector('.article-title').textContent.trim())).join('\n');
-    const answer=prompt('어느 기사에 묶을까요? 번호를 입력하세요.\n'+menu);
-    const n=Number(answer)-1; if(!Number.isInteger(n)||n<0||n>=candidates.length)return;
-    const target=candidates[n], td=dataOf(target);
-    if(!Array.isArray(td.related))td.related=[];
-    td.related.push({title:source.title,publisher:source.publisher,url:source.url,page:source.page||'',author:source.author||'',date:source.date||'',summary:source.summary||''});
-    const group=card.closest('.theme-group'); group.remove(); renderRelated(target); refresh();
-    status('기사를 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
+    const backdrop=document.createElement('div'); backdrop.className='merge-dialog-backdrop';
+    const dialog=document.createElement('div'); dialog.className='merge-dialog'; dialog.setAttribute('role','dialog'); dialog.setAttribute('aria-modal','true');
+    const head=document.createElement('div'); head.className='merge-dialog-head';
+    const heading=document.createElement('h3'); heading.textContent='어느 대표 기사에 묶을까요?';
+    const help=document.createElement('p'); help.textContent='아래에서 대표로 남길 기사를 선택하세요. 현재 기사는 선택한 기사 아래에 함께 묶입니다.';
+    head.append(heading,help); dialog.appendChild(head);
+    const list=document.createElement('div'); list.className='merge-candidates';
+    let selectedRadio=null;
+    candidates.forEach((candidate,index)=>{
+      const d=dataOf(candidate); const label=document.createElement('label'); label.className='merge-candidate';
+      const radio=document.createElement('input'); radio.type='radio'; radio.name='merge-target'; radio.value=String(index);
+      const text=document.createElement('span'); const title=document.createElement('strong');
+      title.textContent=d.title||candidate.querySelector('.article-title').textContent.trim();
+      const meta=document.createElement('small'); meta.textContent=(d.publisher||'매체 미상')+' · '+nameOf(candidate.closest('section.category'));
+      text.append(title,meta); label.append(radio,text); list.appendChild(label);
+      radio.addEventListener('change',()=>{selectedRadio=radio; confirm.disabled=false;});
+    });
+    dialog.appendChild(list);
+    const actions=document.createElement('div'); actions.className='merge-dialog-actions';
+    const cancel=button('취소',()=>backdrop.remove(),actions);
+    const confirm=button('선택한 기사에 묶기',()=>{
+      if(!selectedRadio)return;
+      const target=candidates[Number(selectedRadio.value)], td=dataOf(target);
+      if(!Array.isArray(td.related))td.related=[];
+      td.related.push({title:source.title,publisher:source.publisher,url:source.url,page:source.page||'',author:source.author||'',date:source.date||'',summary:source.summary||''});
+      card.closest('.theme-group').remove(); backdrop.remove(); renderRelated(target); refresh();
+      status('기사를 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
+    },actions);
+    confirm.classList.add('primary'); confirm.disabled=true;
+    backdrop.addEventListener('click',event=>{if(event.target===backdrop)backdrop.remove();});
+    dialog.appendChild(actions); backdrop.appendChild(dialog); document.body.appendChild(backdrop);
+    const firstRadio=list.querySelector('input[type="radio"]'); if(firstRadio)firstRadio.focus();
   }
   function mergeSelected() {
     const selected=Array.from(document.querySelectorAll('[data-group-select]:checked')).map(cb=>cb.closest('[data-card]')).filter(Boolean);
@@ -670,11 +699,12 @@ function makeReportHwpx(groups, dateValue) {
   const toolbar=document.querySelector('.toolbar');
   const selectionTools=document.createElement('span'); selectionTools.className='runtime-button selection-tools';
   selectionTools.style.cssText='display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap';
-  const selectionCount=document.createElement('strong'); selectionCount.id='selection-count'; selectionCount.textContent='선택한 기사: 0개';
+  const selectionCount=document.createElement('strong'); selectionCount.id='selection-count'; selectionCount.textContent='① 묶을 기사 체크: 0개';
   selectionTools.appendChild(selectionCount);
-  const mergeButton=button('선택한 기사 한꺼번에 묶기', mergeSelected, selectionTools);
+  const mergeButton=button('② 체크한 기사 묶기', mergeSelected, selectionTools);
   mergeButton.id='merge-selected-button'; mergeButton.disabled=true;
   button('선택 해제',()=>{document.querySelectorAll('[data-group-select]:checked').forEach(cb=>cb.checked=false);updateSelectionUI();},selectionTools);
+  const mergeHint=document.createElement('span'); mergeHint.className='merge-hint'; mergeHint.textContent='여러 기사를 한 번에 묶으려면 같은 목차 안에서 2개 이상 체크하세요.'; selectionTools.appendChild(mergeHint);
   toolbar.appendChild(selectionTools);
   button('목차 추가', () => {
     const name=prompt('새 목차 이름을 입력하세요.'); if(!name || !name.trim()) return;
@@ -685,6 +715,15 @@ function makeReportHwpx(groups, dateValue) {
     const badge=document.createElement('span'); badge.className='badge'; header.append(h,badge); section.appendChild(header);
     main.insertBefore(section,main.querySelector('footer')); setupSection(section); refresh();
   },toolbar).classList.add('runtime-button');
+  const exportTools=document.createElement('div');
+  exportTools.className='runtime-button export-tools';
+  exportTools.setAttribute('aria-label','파일 내보내기 기능');
+  const exportLabel=document.createElement('span');
+  exportLabel.className='export-tools-label';
+  exportLabel.textContent='파일 내보내기';
+  exportTools.appendChild(exportLabel);
+  toolbar.appendChild(exportTools);
+
   button('PDF로 내보내기', () => {
     try {
       // PDF 저장 대화상자의 기본 파일명을 기사요약_YYMMDD로 유도합니다.
@@ -703,7 +742,7 @@ function makeReportHwpx(groups, dateValue) {
       status('PDF 내보내기 준비 실패: ' + e.message);
       alert('PDF 내보내기 준비 실패: ' + e.message);
     }
-  }, toolbar).classList.add('runtime-button');
+  }, exportTools).classList.add('runtime-button');
 
   button('TXT로 내보내기', () => {
     try {
@@ -742,7 +781,7 @@ function makeReportHwpx(groups, dateValue) {
       status('TXT 저장 실패: ' + e.message);
       alert('TXT 저장 실패: ' + e.message);
     }
-  }, toolbar).classList.add('runtime-button');
+  }, exportTools).classList.add('runtime-button');
 
   button('엑셀로 내보내기', () => {
     try {
@@ -752,7 +791,7 @@ function makeReportHwpx(groups, dateValue) {
       if(!date) { alert('보고서 날짜를 입력하세요.'); return; }
       download(makeIssueXlsx(groups,date),exportBaseName(date)+'.xlsx');
     } catch (e) { status('엑셀 저장 실패: '+e.message); alert('엑셀 저장 실패: '+e.message); }
-  },toolbar).classList.add('runtime-button');
+  },exportTools).classList.add('runtime-button');
 
   button('한글(HWPX)로 내보내기', () => {
     try {
@@ -769,7 +808,7 @@ function makeReportHwpx(groups, dateValue) {
       status('한글 저장 실패: ' + e.message);
       alert('한글 저장 실패: ' + e.message);
     }
-  }, toolbar).classList.add('runtime-button');
+  }, exportTools).classList.add('runtime-button');
 
   document.getElementById('save-html').addEventListener('click', () => {
     try {
@@ -806,10 +845,10 @@ def report_html(report_groups, summaries, generated_at=None):
     cards = sum(len(report_groups.get(cat, {})) for cat in categories)
     pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
-              '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
+              '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.category-header{flex-wrap:wrap}.toolbar{flex-wrap:nowrap}.toolbar>label{white-space:nowrap}.toolbar #save-status{white-space:nowrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
               '<header><h1>기사요약기</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
-              '<div class="toolbar"><label>보고서 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
+              '<div class="toolbar"><label>기사요약 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
               '<p class="note">본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요. 지면·기자·날짜는 엑셀에 해당 열이 있을 때만 표시됩니다.</p>']
     data = []
     for cat in categories:
