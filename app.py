@@ -283,11 +283,11 @@ def excerpt(text, source):
 REPORT_STYLE = """
 :root {--primary:#1a365d;--accent:#2b6cb0;--bg:#f7fafc;--border:#e2e8f0;--text:#2d3748;--muted:#718096}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.6 'Malgun Gothic',-apple-system,BlinkMacSystemFont,sans-serif}
-.container{max-width:960px;margin:0 auto;padding:20px 16px 50px}
-header{background:var(--primary);color:white;border-radius:8px;padding:20px;margin-bottom:18px}
-h1{font-size:23px;margin:0}header p{margin:3px 0 0;font-size:12px;color:#dbeafe}
-.toolbar{display:flex;align-items:center;gap:12px;background:white;border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px}
-.toolbar p{margin:0;flex:1;color:#52647c}button{font:inherit;cursor:pointer;border:1px solid #b9c8da;border-radius:5px;background:white;color:var(--primary);padding:6px 11px}button:hover{background:#eff6ff}
+.container{max-width:960px;margin:0 auto;padding:18px 16px 46px}
+header{background:var(--primary);color:white;border-radius:8px;padding:17px 18px;margin-bottom:14px}
+h1{font-size:21px;margin:0}header p{margin:3px 0 0;font-size:11px;color:#dbeafe}
+.toolbar{display:flex;align-items:center;gap:9px;background:white;border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:13px;font-size:12px}
+.toolbar p{margin:0;flex:1;color:#52647c;font-size:11px}button{font:12px 'Malgun Gothic',sans-serif;cursor:pointer;border:1px solid #b9c8da;border-radius:5px;background:white;color:var(--primary);padding:4px 8px}button:hover{background:#eff6ff}
 .category{margin:18px 0}.category-header{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--primary);margin:0 0 12px;padding:4px 0}
 h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#2563a4}
 .theme-group{border:1px solid var(--border);background:#fff;border-radius:9px;margin:10px 0;overflow:hidden}
@@ -302,7 +302,7 @@ h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#256
 .edit textarea{min-height:100px;resize:vertical;margin-top:3px}.edit .summary-label{margin:9px 0}.edit button{margin-top:5px}
 .empty{color:var(--muted);font-size:12px}.note{color:#607494;font-size:11px;margin:14px 0}footer{color:#607494;font-size:11px;margin-top:20px}
 @media(max-width:600px){.toolbar{flex-wrap:wrap}.edit-grid{grid-template-columns:1fr}.group-media{display:flex;margin:5px 0 0}}
-@media print{body{background:white}.toolbar,.edit-controls{display:none!important}.theme-group{break-inside:avoid}header{print-color-adjust:exact}}
+@media print{body{background:white}.toolbar,.edit-controls,.dynamic-tools,.selection-tools,button,select,input,.note,footer{display:none!important}.container{max-width:none;padding:0}.theme-group{break-inside:avoid;page-break-inside:avoid}header{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
 """
 
 
@@ -679,6 +679,18 @@ function makeReportHwpx(groups, dateValue) {
     const badge=document.createElement('span'); badge.className='badge'; header.append(h,badge); section.appendChild(header);
     main.insertBefore(section,main.querySelector('footer')); setupSection(section); refresh();
   },toolbar).classList.add('runtime-button');
+  button('PDF로 내보내기', () => {
+    try {
+      // 반영되지 않은 입력값을 적용한 뒤, 인쇄 전용 스타일로 수정 도구를 숨깁니다.
+      document.querySelectorAll('[data-card]').forEach(apply);
+      refresh();
+      window.print();
+    } catch (e) {
+      status('PDF 내보내기 준비 실패: ' + e.message);
+      alert('PDF 내보내기 준비 실패: ' + e.message);
+    }
+  }, toolbar).classList.add('runtime-button');
+
   button('TXT로 내보내기', () => {
     try {
       document.querySelectorAll("[data-card]").forEach(apply); refresh();
@@ -699,7 +711,12 @@ function makeReportHwpx(groups, dateValue) {
         lines.push('');
       };
       sections().forEach(section => {
-        Array.from(section.querySelectorAll('[data-card]')).forEach(card => {
+        const categoryName = nameOf(section).trim();
+        const cards = Array.from(section.querySelectorAll('[data-card]'));
+        // 목차명을 TXT에 먼저 표시하고, 해당 목차에 속한 기사를 이어서 기록합니다.
+        lines.push('[' + (categoryName || '목차 미상') + ']');
+        lines.push('');
+        cards.forEach(card => {
           const d = dataOf(card);
           addArticle(d);
           (Array.isArray(d.related) ? d.related : []).forEach(addArticle);
@@ -757,7 +774,7 @@ function makeReportHwpx(groups, dateValue) {
       clone.querySelector('#report-date').setAttribute('value',document.getElementById('report-date').value);
       clone.querySelectorAll('.dynamic-tools,.runtime-button').forEach(e=>e.remove());
       clone.querySelector('#save-status').textContent='저장된 보고서입니다. 편집 후 다시 저장할 수 있습니다.';
-      download(new Blob(['<!DOCTYPE html>\n'+clone.outerHTML],{type:'text/html;charset=utf-8'}),'중앙부처동향_'+document.getElementById('report-date').value+'_편집본.html');
+      download(new Blob(['<!DOCTYPE html>\n'+clone.outerHTML],{type:'text/html;charset=utf-8'}),'기사요약기_'+document.getElementById('report-date').value+'_편집본.html');
     } catch(e) { status('HTML 저장 실패: '+e.message); alert('HTML 저장 실패: '+e.message); }
   });
   refresh();
@@ -775,9 +792,9 @@ def report_html(report_groups, summaries, generated_at=None):
     cards = sum(len(report_groups.get(cat, {})) for cat in categories)
     pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
-              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
+              '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
-              '<header><h1>중앙부처동향</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
+              '<header><h1>기사요약기</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
               '<div class="toolbar"><label>보고서 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
               '<p class="note">본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요. 지면·기자·날짜는 엑셀에 해당 열이 있을 때만 표시됩니다.</p>']
     data = []
@@ -1095,7 +1112,7 @@ class ReportApp:
         for category, groups in self.report_groups.items():
             for key in groups:
                 summaries[(category,key)]=self.card_summary.get((category,key),'')
-        filename='중앙부처동향_'+datetime.now().strftime('%Y-%m-%d')+'.html'
+        filename='기사요약기_'+datetime.now().strftime('%Y-%m-%d')+'.html'
         target=filedialog.asksaveasfilename(title='HTML 보고서 저장',defaultextension='.html',
                  initialfile=filename,filetypes=[('HTML 파일','*.html')])
         if not target:
