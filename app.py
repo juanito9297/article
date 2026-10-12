@@ -840,7 +840,7 @@ def simple_input(parent, title, prompt):
 class ReportApp:
     def __init__(self, root):
         self.root = root
-        root.title('중앙부처동향 — 기사 본문 발췌')
+        root.title('기사요약기 — 기사 본문 발췌')
         root.geometry('1000x760')
         self.events = queue.Queue()
         self.cards = []
@@ -850,7 +850,7 @@ class ReportApp:
         self.card_widgets = {}
 
         header = ttk.Frame(root, padding=12); header.pack(fill='x')
-        ttk.Label(header,text='중앙부처동향',font=('맑은 고딕',18,'bold')).pack(side='left', padx=(0,18))
+        ttk.Label(header,text='기사요약기',font=('맑은 고딕',18,'bold')).pack(side='left', padx=(0,18))
         self.open_button = ttk.Button(header,text='기사 엑셀 열기',command=self.open_excel)
         self.open_button.pack(side='left',padx=5)
         self.all_button = ttk.Button(header,text='모든 대표 기사 발췌',command=self.fetch_all)
