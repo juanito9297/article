@@ -679,6 +679,40 @@ function makeReportHwpx(groups, dateValue) {
     const badge=document.createElement('span'); badge.className='badge'; header.append(h,badge); section.appendChild(header);
     main.insertBefore(section,main.querySelector('footer')); setupSection(section); refresh();
   },toolbar).classList.add('runtime-button');
+  button('TXT로 내보내기', () => {
+    try {
+      document.querySelectorAll("[data-card]").forEach(apply); refresh();
+      const date = document.getElementById('report-date').value;
+      if (!date) { alert('보고서 날짜를 입력하세요.'); return; }
+      const parts = date.split('-').map(Number);
+      const dt = new Date(parts[0], parts[1]-1, parts[2]);
+      const weekdays = ['일','월','화','수','목','금','토'];
+      const heading = '<' + parts[1] + '/' + parts[2] + '(' + weekdays[dt.getDay()] + ')> 모니터링입니다.';
+      const lines = [heading, ''];
+      const addArticle = article => {
+        const publisher = String(article.publisher || '').trim();
+        const title = String(article.title || '').trim();
+        const url = String(article.url || '').trim();
+        if (!title) return;
+        lines.push('[' + (publisher || '매체 미상') + '] ' + title);
+        lines.push(url);
+        lines.push('');
+      };
+      sections().forEach(section => {
+        Array.from(section.querySelectorAll('[data-card]')).forEach(card => {
+          const d = dataOf(card);
+          addArticle(d);
+          (Array.isArray(d.related) ? d.related : []).forEach(addArticle);
+        });
+      });
+      const content = lines.join('\r\n').replace(/\r\n+$/, '') + '\r\n';
+      download(new Blob(['\ufeff', content], {type:'text/plain;charset=utf-8'}), '기사요약기_' + date + '.txt');
+    } catch (e) {
+      status('TXT 저장 실패: ' + e.message);
+      alert('TXT 저장 실패: ' + e.message);
+    }
+  }, toolbar).classList.add('runtime-button');
+
   button('엑셀로 내보내기', () => {
     try {
       document.querySelectorAll("[data-card]").forEach(apply); refresh();
