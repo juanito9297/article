@@ -488,6 +488,12 @@ function makeReportHwpx(groups, dateValue) {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     status('다운로드를 요청했습니다. 브라우저 다운로드 목록을 확인하세요.');
   }
+  function exportBaseName(dateValue) {
+    // HTML의 날짜 입력값(YYYY-MM-DD)을 요청한 YYMMDD 형식으로 변환합니다.
+    const m = String(dateValue || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) throw new Error('보고서 날짜를 YYYY-MM-DD 형식으로 입력하세요.');
+    return '기사요약_' + m[1].slice(-2) + m[2] + m[3];
+  }
   function apply(card) {
     const d = dataOf(card);
     card.querySelectorAll('[data-field]').forEach(input => { d[input.dataset.field] = input.value.trim(); });
@@ -681,10 +687,18 @@ function makeReportHwpx(groups, dateValue) {
   },toolbar).classList.add('runtime-button');
   button('PDF로 내보내기', () => {
     try {
+      // PDF 저장 대화상자의 기본 파일명을 기사요약_YYMMDD로 유도합니다.
+      const date = document.getElementById('report-date').value;
+      if (!date) { alert('보고서 날짜를 입력하세요.'); return; }
+      const oldTitle = document.title;
+      document.title = exportBaseName(date);
       // 반영되지 않은 입력값을 적용한 뒤, 인쇄 전용 스타일로 수정 도구를 숨깁니다.
       document.querySelectorAll('[data-card]').forEach(apply);
       refresh();
+      const restoreTitle = () => { document.title = oldTitle; window.removeEventListener('afterprint', restoreTitle); };
+      window.addEventListener('afterprint', restoreTitle);
       window.print();
+      setTimeout(restoreTitle, 1500);
     } catch (e) {
       status('PDF 내보내기 준비 실패: ' + e.message);
       alert('PDF 내보내기 준비 실패: ' + e.message);
@@ -723,7 +737,7 @@ function makeReportHwpx(groups, dateValue) {
         });
       });
       const content = lines.join('\r\n').replace(/\r\n+$/, '') + '\r\n';
-      download(new Blob(['\ufeff', content], {type:'text/plain;charset=utf-8'}), '기사요약기_' + date + '.txt');
+      download(new Blob(['\ufeff', content], {type:'text/plain;charset=utf-8'}), exportBaseName(date) + '.txt');
     } catch (e) {
       status('TXT 저장 실패: ' + e.message);
       alert('TXT 저장 실패: ' + e.message);
@@ -736,7 +750,7 @@ function makeReportHwpx(groups, dateValue) {
       const groups=sections().map(section=>({name:nameOf(section),items:Array.from(section.querySelectorAll('[data-card]')).map(dataOf)}));
       const date=document.getElementById('report-date').value;
       if(!date) { alert('보고서 날짜를 입력하세요.'); return; }
-      download(makeIssueXlsx(groups,date),'중앙부처_오늘의이슈_'+date+'.xlsx');
+      download(makeIssueXlsx(groups,date),exportBaseName(date)+'.xlsx');
     } catch (e) { status('엑셀 저장 실패: '+e.message); alert('엑셀 저장 실패: '+e.message); }
   },toolbar).classList.add('runtime-button');
 
@@ -750,7 +764,7 @@ function makeReportHwpx(groups, dateValue) {
       }));
       const date = document.getElementById('report-date').value;
       if (!date) { alert('보고서 날짜를 입력하세요.'); return; }
-      download(makeReportHwpx(groups, date), '중앙부처_언론보도_' + date + '.hwpx');
+      download(makeReportHwpx(groups, date), exportBaseName(date) + '.hwpx');
     } catch (e) {
       status('한글 저장 실패: ' + e.message);
       alert('한글 저장 실패: ' + e.message);
