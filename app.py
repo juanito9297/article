@@ -522,12 +522,12 @@ function makeReportHwpx(groups, dateValue) {
       row.appendChild(label);
       const out=document.createElement('button'); out.type='button'; out.textContent='빼기'; out.title='이 기사를 묶음에서 분리';
       out.style.cssText='padding:1px 5px;font-size:10px;flex-shrink:0';
-      out.addEventListener('click',()=>{ d.related.splice(i,1); const fresh={...r,summary:'',related:[],category:d.category}; items.push(fresh);
+      out.addEventListener('click',()=>{ d.related.splice(i,1); const fresh={...r,summary:r.summary||'',related:Array.isArray(r.related)?r.related:[],category:d.category}; items.push(fresh);
         const source=card.closest('.theme-group'), clone=source.cloneNode(true), newCard=clone.querySelector('[data-card]');
         newCard.dataset.card=String(items.length-1);
         newCard.querySelector('.article-title').textContent=fresh.title||'';
         newCard.querySelector('.media').textContent=fresh.publisher||'';
-        newCard.querySelector('[data-summary]').textContent='요약 미입력 — 요약을 입력하세요.';
+        newCard.querySelector('[data-summary]').textContent=fresh.summary||'요약 미입력 — 요약을 입력하세요.';
         ['page','author','date'].forEach(f=>{const sp=newCard.querySelector('[data-meta="'+f+'"]');sp.textContent=fresh[f]||'';sp.hidden=!fresh[f];});
         newCard.querySelectorAll('[data-field]').forEach(inp=>{inp.value=fresh[inp.dataset.field]||'';});
         const h=clone.querySelector('.theme-title'); h.textContent=fresh.title||'';
@@ -561,8 +561,14 @@ function makeReportHwpx(groups, dateValue) {
     c.querySelector('[data-apply]').addEventListener('click',()=>{apply(c);c.querySelector('details').open=false;});
     renderRelated(c); return clone;
   }
+  function addSelectCheckbox(card, controls) {
+    const label=document.createElement('label'); label.className='article-select-label';
+    const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.groupSelect=''; cb.setAttribute('aria-label','기사 묶기 선택');
+    label.append(cb,document.createTextNode(' 묶기 선택')); controls.appendChild(label);
+  }
   function wireNewCard(card) {
     const controls=document.createElement('div'); controls.className='dynamic-tools'; card.appendChild(controls);
+    addSelectCheckbox(card,controls);
     button('기사 묶기',()=>mergePrompt(card),controls);
     button('기사 위로',()=>{const g=card.closest('.theme-group'),p=g.previousElementSibling;if(p&&p.matches('.theme-group'))g.parentNode.insertBefore(g,p);},controls);
     button('기사 아래로',()=>{const g=card.closest('.theme-group'),n=g.nextElementSibling;if(n&&n.matches('.theme-group'))g.parentNode.insertBefore(n,g);},controls);
@@ -578,6 +584,24 @@ function makeReportHwpx(groups, dateValue) {
     td.related.push({title:source.title,publisher:source.publisher,url:source.url,page:source.page||'',author:source.author||'',date:source.date||'',summary:source.summary||''});
     const group=card.closest('.theme-group'); group.remove(); renderRelated(target); refresh();
     status('기사를 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
+  }
+  function mergeSelected() {
+    const selected=Array.from(document.querySelectorAll('[data-group-select]:checked')).map(cb=>cb.closest('[data-card]')).filter(Boolean);
+    if(selected.length<2){alert('묶을 기사를 2개 이상 체크하세요.');return;}
+    const section=selected[0].closest('section.category');
+    if(selected.some(card=>card.closest('section.category')!==section)){alert('같은 목차 안의 기사끼리만 묶을 수 있습니다.');return;}
+    // The first checked article in document order becomes the representative article.
+    const ordered=Array.from(section.querySelectorAll('[data-card]')).filter(card=>selected.includes(card));
+    const target=ordered[0], td=dataOf(target);
+    if(!Array.isArray(td.related))td.related=[];
+    ordered.slice(1).forEach(card=>{
+      const d=dataOf(card);
+      td.related.push({title:d.title||card.querySelector('.article-title').textContent.trim(),publisher:d.publisher||'',url:d.url||'',page:d.page||'',author:d.author||'',date:d.date||'',summary:d.summary||'',related:Array.isArray(d.related)?d.related:[]});
+      card.closest('.theme-group').remove();
+    });
+    ordered.forEach(card=>{const cb=card.querySelector('[data-group-select]');if(cb)cb.checked=false;});
+    renderRelated(target); refresh();
+    status('체크한 기사들을 첫 번째 선택 기사에 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
   }
   function refresh() {
     const all=sections();
@@ -620,6 +644,7 @@ function makeReportHwpx(groups, dateValue) {
     });
     card.querySelector('[data-apply]').addEventListener('click', () => { apply(card); card.querySelector('details').open=false; status('수정 사항을 반영했습니다. 파일에 남기려면 HTML을 저장하세요.'); });
     const controls=document.createElement('div'); controls.className='dynamic-tools'; card.appendChild(controls);
+    addSelectCheckbox(card,controls);
     button('기사 묶기', () => mergePrompt(card),controls);
     button('기사 위로', () => { const group=card.closest('.theme-group'), prev=group.previousElementSibling; if(prev && prev.matches('.theme-group')) group.parentNode.insertBefore(group,prev); },controls);
     button('기사 아래로', () => { const group=card.closest('.theme-group'), next=group.nextElementSibling; if(next && next.matches('.theme-group')) group.parentNode.insertBefore(next,group); },controls);
@@ -629,6 +654,7 @@ function makeReportHwpx(groups, dateValue) {
   });
   sections().forEach(setupSection);
   const toolbar=document.querySelector('.toolbar');
+  button('체크한 기사 묶기', mergeSelected, toolbar).classList.add('runtime-button');
   button('목차 추가', () => {
     const name=prompt('새 목차 이름을 입력하세요.'); if(!name || !name.trim()) return;
     if(sections().some(s=>nameOf(s)===name.trim())) { alert('같은 이름의 목차가 있습니다.'); return; }
@@ -699,7 +725,7 @@ def report_html(report_groups, summaries, generated_at=None):
     cards = sum(len(report_groups.get(cat, {})) for cat in categories)
     pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
-              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
+              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
               '<header><h1>중앙부처동향</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
               '<div class="toolbar"><label>보고서 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
