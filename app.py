@@ -285,7 +285,7 @@ REPORT_STYLE = """
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.6 'Malgun Gothic',-apple-system,BlinkMacSystemFont,sans-serif}
 .container{max-width:960px;margin:0 auto;padding:18px 16px 46px}
 header{background:var(--primary);color:white;border-radius:8px;padding:17px 18px;margin-bottom:14px}
-h1{font-size:21px;margin:0}header p{margin:3px 0 0;font-size:11px;color:#dbeafe}
+h1{font-size:21px;margin:0}header p{margin:3px 0 0;font-size:11px;color:#dbeafe}.report-heading-editable{outline:none;border-radius:3px}.report-heading-editable:focus{outline:2px dashed #bfdbfe;outline-offset:3px;background:rgba(255,255,255,.08)}
 .toolbar{position:sticky;top:0;z-index:1000;display:flex;align-items:center;gap:9px;background:white;border:1px solid var(--border);border-radius:8px;padding:9px 12px;margin-bottom:13px;font-size:12px;box-shadow:0 3px 10px rgba(26,54,93,.12)}
 .toolbar p{margin:0;flex:1;color:#52647c;font-size:11px}.export-tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:4px 6px;border:1px solid #d7e1ed;border-radius:6px;background:#f7fafc;flex-shrink:0}.export-tools-label{font-size:11px;font-weight:700;color:#52647c;white-space:nowrap;padding:0 3px}button{font:12px 'Malgun Gothic',sans-serif;cursor:pointer;border:1px solid #b9c8da;border-radius:5px;background:white;color:var(--primary);padding:4px 8px}button:hover{background:#eff6ff}
 .category{margin:18px 0}.category-header{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--primary);margin:0 0 12px;padding:4px 0}
@@ -847,7 +847,7 @@ def report_html(report_groups, summaries, generated_at=None):
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
               '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.category-header{flex-wrap:wrap}.toolbar{flex-wrap:wrap;align-items:center}.toolbar>label{white-space:nowrap}.toolbar #save-status{white-space:nowrap;flex:1 1 auto}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools{display:inline-flex;flex-wrap:nowrap;align-items:center;white-space:nowrap;gap:8px;min-width:max-content}.merge-hint{flex:0 0 auto;white-space:nowrap}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
-              '<header><h1>기사요약기</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
+              '<header><h1 class="report-heading-editable" contenteditable="true" role="textbox" aria-label="보고서 제목 수정" spellcheck="false">기사요약기</h1><p class="report-heading-editable" contenteditable="true" role="textbox" aria-label="보고서 부제목 수정" spellcheck="false">생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
               '<div class="toolbar"><label>기사요약 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
               '<p class="note">본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요. 지면·기자·날짜는 엑셀에 해당 열이 있을 때만 표시됩니다.</p>']
     data = []
