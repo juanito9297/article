@@ -561,9 +561,17 @@ function makeReportHwpx(groups, dateValue) {
     c.querySelector('[data-apply]').addEventListener('click',()=>{apply(c);c.querySelector('details').open=false;});
     renderRelated(c); return clone;
   }
+  function updateSelectionUI() {
+    const selected=Array.from(document.querySelectorAll('[data-group-select]:checked'));
+    const count=document.getElementById('selection-count');
+    const mergeButton=document.getElementById('merge-selected-button');
+    if(count) count.textContent='선택한 기사: '+selected.length+'개';
+    if(mergeButton) mergeButton.disabled=selected.length<2;
+  }
   function addSelectCheckbox(card, controls) {
     const label=document.createElement('label'); label.className='article-select-label';
     const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.groupSelect=''; cb.setAttribute('aria-label','기사 묶기 선택');
+    cb.addEventListener('change',updateSelectionUI);
     label.append(cb,document.createTextNode(' 묶기 선택')); controls.appendChild(label);
   }
   function wireNewCard(card) {
@@ -600,8 +608,8 @@ function makeReportHwpx(groups, dateValue) {
       card.closest('.theme-group').remove();
     });
     ordered.forEach(card=>{const cb=card.querySelector('[data-group-select]');if(cb)cb.checked=false;});
-    renderRelated(target); refresh();
-    status('체크한 기사들을 첫 번째 선택 기사에 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
+    renderRelated(target); refresh(); updateSelectionUI();
+    status('선택한 '+ordered.length+'개 기사를 묶었습니다. HTML 저장을 눌러 변경 사항을 보존하세요.');
   }
   function refresh() {
     const all=sections();
@@ -654,7 +662,14 @@ function makeReportHwpx(groups, dateValue) {
   });
   sections().forEach(setupSection);
   const toolbar=document.querySelector('.toolbar');
-  button('체크한 기사 묶기', mergeSelected, toolbar).classList.add('runtime-button');
+  const selectionTools=document.createElement('span'); selectionTools.className='runtime-button selection-tools';
+  selectionTools.style.cssText='display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap';
+  const selectionCount=document.createElement('strong'); selectionCount.id='selection-count'; selectionCount.textContent='선택한 기사: 0개';
+  selectionTools.appendChild(selectionCount);
+  const mergeButton=button('선택한 기사 한꺼번에 묶기', mergeSelected, selectionTools);
+  mergeButton.id='merge-selected-button'; mergeButton.disabled=true;
+  button('선택 해제',()=>{document.querySelectorAll('[data-group-select]:checked').forEach(cb=>cb.checked=false);updateSelectionUI();},selectionTools);
+  toolbar.appendChild(selectionTools);
   button('목차 추가', () => {
     const name=prompt('새 목차 이름을 입력하세요.'); if(!name || !name.trim()) return;
     if(sections().some(s=>nameOf(s)===name.trim())) { alert('같은 이름의 목차가 있습니다.'); return; }
@@ -712,6 +727,7 @@ function makeReportHwpx(groups, dateValue) {
     } catch(e) { status('HTML 저장 실패: '+e.message); alert('HTML 저장 실패: '+e.message); }
   });
   refresh();
+  updateSelectionUI();
 }());
 
 """
@@ -725,7 +741,7 @@ def report_html(report_groups, summaries, generated_at=None):
     cards = sum(len(report_groups.get(cat, {})) for cat in categories)
     pieces = ['<!DOCTYPE html>', '<html lang="ko"><head><meta charset="UTF-8">',
               '<meta name="viewport" content="width=device-width, initial-scale=1">',
-              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
+              '<title>중앙부처동향 · 기사 보고서</title><style>', REPORT_STYLE + "\n.toolbar,.category-header{flex-wrap:wrap}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
               '<header><h1>중앙부처동향</h1><p>생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
               '<div class="toolbar"><label>보고서 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
