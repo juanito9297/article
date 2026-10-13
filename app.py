@@ -481,6 +481,66 @@ function makeReportHwpx(groups, dateValue) {
   const cards = Array.from(document.querySelectorAll('[data-card]'));
   const main = document.querySelector('main');
   const status = message => { document.getElementById('save-status').textContent = message; };
+
+  // XLSX import: preserve category and article row order from the workbook.
+  const loadXlsxButton = document.getElementById('load-xlsx');
+  const xlsxInput = document.getElementById('xlsx-file');
+  if (loadXlsxButton && xlsxInput) {
+    loadXlsxButton.addEventListener('click', () => xlsxInput.click());
+    xlsxInput.addEventListener('change', async () => {
+      const file = xlsxInput.files && xlsxInput.files[0]; if (!file) return;
+      try {
+        if (!window.XLSX) throw new Error('엑셀 읽기 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.');
+        const workbook = XLSX.read(await file.arrayBuffer(), {type:'array', cellDates:true});
+        const sheet = workbook.Sheets['기사 목록'];
+        if (!sheet) throw new Error('엑셀 파일에 「기사 목록」 시트가 없습니다.');
+        const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:false});
+        if (!rows.length) throw new Error('엑셀 시트가 비어 있습니다.');
+        const norm = v => String(v == null ? '' : v).replace(/\s+/g,'').trim();
+        const headers = rows[0].map(norm), findCol = (...names) => headers.findIndex(h => names.includes(h));
+        const ti=findCol('기사제목','제목','기사 제목'), pi=findCol('매체명','보도매체');
+        const ui=findCol('기사URL','URL','원문URL'), si=findCol('요약','기사요약');
+        const pgi=findCol('지면','지면정보','면','신문지면'), ai=findCol('기자명','기자','기자이름','작성자');
+        const di=findCol('발행일','기사날짜','날짜','일자','작성일','보도일','등록일');
+        if(ti<0 || pi<0) throw new Error('「기사제목」과 「매체명」 열을 찾지 못했습니다.');
+        const categories=[], records=[]; let current='';
+        rows.slice(1).forEach((row,i)=>{
+          const title=String(row[ti]||'').trim(), publisher=String(row[pi]||'').trim(); if(!title)return;
+          if(!publisher){current=title;if(!categories.includes(current))categories.push(current);return;}
+          if(!current)throw new Error((i+2)+'행 앞에 목차 구분 행이 없습니다.');
+          records.push({category:current,title,publisher,url:String(row[ui]||'').trim(),summary:String(row[si]||'').trim(),page:String(row[pgi]||'').trim(),author:String(row[ai]||'').trim(),date:String(row[di]||'').trim(),related:[]});
+        });
+        if(!categories.length || !records.length) throw new Error('목차 또는 기사 데이터를 찾지 못했습니다. 목차 행의 매체명 셀은 비워야 합니다.');
+        const firstSection=sections()[0], firstGroup=firstSection&&firstSection.querySelector('.theme-group');
+        if(!firstGroup) throw new Error('기존 HTML에 기사 카드 템플릿이 없습니다.');
+        const template=firstGroup.cloneNode(true); sections().forEach(sec=>sec.remove()); items.splice(0,items.length);
+        categories.forEach(category=>{
+          const section=document.createElement('section');section.className='category';
+          const header=document.createElement('div');header.className='category-header';
+          const h=document.createElement('h2');h.textContent=category;const badge=document.createElement('span');badge.className='badge';header.append(h,badge);section.append(header);
+          main.insertBefore(section,main.querySelector('footer'));setupSection(section);
+          records.filter(r=>r.category===category).forEach(r=>{
+            const idx=items.length;items.push(r);const group=template.cloneNode(true),card=group.querySelector('[data-card]');card.dataset.card=String(idx);
+            const titleNode=card.querySelector('.article-title');titleNode.replaceChildren();const link=safeLink(r.url);
+            if(link){const a=document.createElement('a');a.href=link;a.target='_blank';a.rel='noopener noreferrer';a.textContent=r.title;titleNode.appendChild(a);}else titleNode.textContent=r.title;
+            group.querySelector('.theme-title').textContent=r.title;card.querySelector('.media').textContent=r.publisher;
+            card.querySelector('[data-summary]').textContent=r.summary||'요약 미입력 — 요약을 입력하세요.';
+            ['page','author','date'].forEach(f=>{const el=card.querySelector('[data-meta="'+f+'"]');el.textContent=r[f]||'';el.hidden=!r[f];});
+            card.querySelectorAll('[data-field]').forEach(input=>input.value=r[input.dataset.field]||'');
+            group.querySelectorAll('.dynamic-tools,.group-media').forEach(n=>n.remove());section.appendChild(group);
+            const controls=document.createElement('div');controls.className='dynamic-tools';card.appendChild(controls);addSelectCheckbox(card,controls);
+            button('기사 묶기',()=>mergePrompt(card),controls);
+            button('기사 위로',()=>{const g=card.closest('.theme-group'),p=g.previousElementSibling;if(p&&p.matches('.theme-group'))g.parentNode.insertBefore(g,p);},controls);
+            button('기사 아래로',()=>{const g=card.closest('.theme-group'),n=g.nextElementSibling;if(n&&n.matches('.theme-group'))g.parentNode.insertBefore(n,g);},controls);
+            const sel=document.createElement('select');sel.dataset.moveSelect='';controls.appendChild(sel);button('목차로 이동',()=>{const target=sections()[Number(sel.value)];if(target)target.appendChild(group);refresh();},controls);
+            card.querySelector('[data-apply]').addEventListener('click',()=>{apply(card);card.querySelector('details').open=false;});renderRelated(card);
+          });
+        });
+        refresh();updateSelectionUI();status('엑셀에서 '+records.length+'개 기사를 불러왔습니다. 목차 및 기사 순서를 유지했습니다.');
+      } catch(e) {status('엑셀 불러오기 실패: '+e.message);alert('엑셀 불러오기 실패: '+e.message);}
+      finally {xlsxInput.value='';}
+    });
+  }
   const sections = () => Array.from(document.querySelectorAll('section.category'));
   const nameOf = section => section.querySelector('h2').textContent;
   const dataOf = card => items[Number(card.dataset.card)];
@@ -860,7 +920,7 @@ def report_html(report_groups, summaries, generated_at=None):
               '<title>기사요약기 · 기사 보고서</title><style>', REPORT_STYLE + "\n.category-header{flex-wrap:wrap}.toolbar{flex-wrap:wrap;align-items:center}.toolbar>label{white-space:nowrap}.toolbar #save-status{white-space:nowrap;flex:1 1 auto}.dynamic-tools{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}.article-select-label{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#235e9d;padding:4px 7px;border:1px solid #b9c8da;border-radius:4px}.article-select-label input{margin:0}.selection-tools{display:inline-flex;flex-wrap:nowrap;align-items:center;white-space:nowrap;gap:8px;min-width:max-content}.merge-hint{flex:0 0 auto;white-space:nowrap}.selection-tools button:disabled{opacity:.45;cursor:not-allowed}.selection-tools strong{font-size:12px;color:#235e9d}select,input[type=date]{font:inherit;padding:5px;border:1px solid #b9c8da}@media print{.dynamic-tools{display:none!important}}",
               '</style></head><body><main class="container">',
               '<header><h1 class="report-heading-editable" contenteditable="true" role="textbox" aria-label="보고서 제목 수정" spellcheck="false">기사요약기</h1><p class="report-heading-editable" contenteditable="true" role="textbox" aria-label="보고서 부제목 수정" spellcheck="false">생성: '+esc(now)+' · 전체 '+str(count)+'건 · '+str(cards)+'개 묶음</p></header>',
-              '<div class="toolbar"><label>기사요약 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="save-html">수정한 HTML 저장</button></div>',
+              '<div class="toolbar"><label>기사요약 날짜 <input id="report-date" type="date" value="'+esc(str(now)[:10])+'"></label><p id="save-status">「내용 수정」 후 「수정한 HTML 저장」을 누르면 새 HTML 파일을 내려받습니다.</p><button type="button" id="load-xlsx">엑셀 파일 불러오기</button><input id="xlsx-file" type="file" accept=".xlsx,.xls" hidden><button type="button" id="save-html">수정한 HTML 저장</button></div>',
               '<p class="note">본문 발췌는 AI 요약이 아닙니다. 원문과 대조해 주세요. 지면·기자·날짜는 엑셀에 해당 열이 있을 때만 표시됩니다.</p>']
     data = []
     for cat in categories:
@@ -924,7 +984,7 @@ def report_html(report_groups, summaries, generated_at=None):
         pieces.append('</section>')
     safe_json = json.dumps(data, ensure_ascii=False).replace('<', chr(92)+'u003c').replace('>', chr(92)+'u003e').replace('&', chr(92)+'u0026')
     pieces.extend(['<footer>편집 내용은 「수정한 HTML 저장」을 누르면 새 파일로 저장됩니다. 기존 파일은 변경되지 않습니다.</footer></main>',
-                   '<script id="report-state" type="application/json">',safe_json,'</script><script>',REPORT_SCRIPT,'</script></body></html>'])
+                   '<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script><script id="report-state" type="application/json">',safe_json,'</script><script>',REPORT_SCRIPT,'</script></body></html>'])
     return ''.join(pieces)
 
 def simple_input(parent, title, prompt):
