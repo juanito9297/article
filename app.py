@@ -517,8 +517,8 @@ function makeReportHwpx(groups, dateValue) {
   }
 
   function renderRelated(card) {
-    const d=dataOf(card), heading=card.closest('.theme-group').querySelector('.theme-title');
-    heading.querySelectorAll('.group-media').forEach(n=>n.remove());
+    const d=dataOf(card), article=card.closest('article.article');
+    article.querySelectorAll(':scope > .group-media').forEach(n=>n.remove());
     if (!Array.isArray(d.related)) d.related=[];
     if (!d.related.length) return;
     const wrap=document.createElement('div'); wrap.className='group-media';
@@ -550,7 +550,8 @@ function makeReportHwpx(groups, dateValue) {
       });
       row.appendChild(out); wrap.appendChild(row);
     });
-    heading.appendChild(wrap);
+    const tools=article.querySelector(':scope > .dynamic-tools');
+    if(tools) article.insertBefore(wrap,tools); else article.appendChild(wrap);
   }
   function makeStandaloneFromData(r, section, afterGroup) {
     const template=section.querySelector('[data-card]');
@@ -868,24 +869,6 @@ def report_html(report_groups, summaries, generated_at=None):
                     others_names.append(name)
                     seen.add(media_key(name))
             pieces.extend(['<div class="theme-group"><div class="theme-title">',esc(first['title'])])
-            if others:
-                pieces.append('<div class="group-media"><span class="group-media-label">함께 보도한 매체:</span>')
-                seen_related = set()
-                for related_article in others:
-                    publisher_name = related_article.get('publisher','')
-                    if publisher_name and media_key(publisher_name) in seen_related:
-                        continue
-                    if publisher_name:
-                        seen_related.add(media_key(publisher_name))
-                    related_label = ('<' + publisher_name + '> ' if publisher_name else '') + str(related_article.get('title','') or '')
-                    related_url = safe_report_url(related_article.get('url'))
-                    pieces.append('<div class="group-media-item"><span>')
-                    if related_url:
-                        pieces.extend(['<a href="',esc(related_url),'" target="_blank" rel="noopener noreferrer">',esc(related_label),'</a>'])
-                    else:
-                        pieces.append(esc(related_label))
-                    pieces.append('</span></div>')
-                pieces.append('</div>')
             pieces.extend(['</div><article class="article" data-card="',str(len(data)),'"><div class="article-title">'])
             link = safe_report_url(first.get('url'))
             if link:
@@ -907,7 +890,26 @@ def report_html(report_groups, summaries, generated_at=None):
             for field,label in (('page','지면'),('author','기자 이름'),('date','발행일')):
                 pieces.extend(['<label>',label,'<input data-field="',field,'" value="',esc(data[-1][field]),'"></label>'])
             pieces.extend(['</div><label class="summary-label">요약<textarea data-field="summary">',esc(summary),
-                           '</textarea></label><button type="button" data-apply>수정 반영</button></div></details></article></div>'])
+                           '</textarea></label><button type="button" data-apply>수정 반영</button></div></details>'])
+            if others:
+                pieces.append('<div class="group-media"><span class="group-media-label">함께 보도한 매체:</span>')
+                seen_related = set()
+                for related_article in others:
+                    publisher_name = related_article.get('publisher','')
+                    if publisher_name and media_key(publisher_name) in seen_related:
+                        continue
+                    if publisher_name:
+                        seen_related.add(media_key(publisher_name))
+                    related_label = ('<' + publisher_name + '> ' if publisher_name else '') + str(related_article.get('title','') or '')
+                    related_url = safe_report_url(related_article.get('url'))
+                    pieces.append('<div class="group-media-item"><span>')
+                    if related_url:
+                        pieces.extend(['<a href="',esc(related_url),'" target="_blank" rel="noopener noreferrer">',esc(related_label),'</a>'])
+                    else:
+                        pieces.append(esc(related_label))
+                    pieces.append('</span></div>')
+                pieces.append('</div>')
+            pieces.append('</article></div>')
         pieces.append('</section>')
     safe_json = json.dumps(data, ensure_ascii=False).replace('<', chr(92)+'u003c').replace('>', chr(92)+'u003e').replace('&', chr(92)+'u0026')
     pieces.extend(['<footer>편집 내용은 「수정한 HTML 저장」을 누르면 새 파일로 저장됩니다. 기존 파일은 변경되지 않습니다.</footer></main>',
