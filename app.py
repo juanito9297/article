@@ -291,7 +291,7 @@ h1{font-size:21px;margin:0}header p{margin:3px 0 0;font-size:11px;color:#dbeafe}
 .category{margin:18px 0}.category-header{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--primary);margin:0 0 12px;padding:4px 0}
 h2{font-size:17px;margin:0;color:var(--primary)}.badge{font-size:11px;color:#2563a4}
 .theme-group{border:1px solid var(--border);background:#fff;border-radius:9px;margin:10px 0;overflow:hidden}
-.theme-title{font-weight:700;background:#edf3f9;color:var(--primary);padding:10px 15px}
+.theme-title{font-weight:700;background:#edf3f9;color:var(--primary);padding:10px 15px;outline:none}.theme-title[contenteditable="true"]:focus{outline:2px dashed #2b6cb0;outline-offset:-3px}.theme-title[hidden]{display:none!important}
 .group-media{font-weight:400;font-size:11px;color:#62748c;margin:5px 0 0;display:flex;flex-direction:column;align-items:flex-start;gap:4px}.group-media-label{display:block}.group-media-item{display:flex;align-items:center;gap:5px;margin-left:8px}.group-media-item a{color:#235e9d;text-decoration:none;font-weight:400}.group-media-item a:hover{text-decoration:underline}
 .article{padding:11px 15px 14px;border-top:1px solid var(--border)}
 .article-title{font-weight:700;margin:0 0 5px}.article-title a{color:#172e4b;text-decoration:none}.article-title a:hover{text-decoration:underline}
@@ -507,8 +507,6 @@ function makeReportHwpx(groups, dateValue) {
     if (url) {
       const a = document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=d.title; title.appendChild(a);
     } else { title.textContent=d.title; }
-    const heading = card.closest('.theme-group').querySelector('.theme-title');
-    if (heading.firstChild && heading.firstChild.nodeType===3) heading.firstChild.textContent=d.title;
     card.querySelector('.media').textContent = d.publisher;
     ['page','author','date'].forEach(field => {
       const span = card.querySelector('[data-meta="'+field+'"]'); span.textContent=d[field]; span.hidden=!d[field];
@@ -518,8 +516,13 @@ function makeReportHwpx(groups, dateValue) {
 
   function renderRelated(card) {
     const d=dataOf(card), article=card.closest('article.article');
+    const groupHeading=card.closest('.theme-group').querySelector('.theme-title');
     article.querySelectorAll(':scope > .group-media').forEach(n=>n.remove());
     if (!Array.isArray(d.related)) d.related=[];
+    groupHeading.hidden = d.related.length === 0;
+    groupHeading.contentEditable = d.related.length > 0 ? 'true' : 'false';
+    groupHeading.setAttribute('role', d.related.length > 0 ? 'textbox' : '');
+    groupHeading.setAttribute('aria-label', '묶음 대표 제목 수정');
     if (!d.related.length) return;
     const wrap=document.createElement('div'); wrap.className='group-media';
     const caption=document.createElement('span'); caption.className='group-media-label'; caption.textContent='함께 보도한 매체:'; wrap.appendChild(caption);
