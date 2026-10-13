@@ -790,7 +790,14 @@ function makeReportHwpx(groups, dateValue) {
   button('엑셀로 내보내기', () => {
     try {
       document.querySelectorAll("[data-card]").forEach(apply); refresh();
-      const groups=sections().map(section=>({name:nameOf(section),items:Array.from(section.querySelectorAll('[data-card]')).map(dataOf)}));
+      // Excel에도 TXT와 동일하게 묶음 대표 기사와 함께 보도한 모든 기사를 개별 행으로 내보냅니다.
+      const groups=sections().map(section=>({
+        name:nameOf(section),
+        items:Array.from(section.querySelectorAll('[data-card]')).flatMap(card=>{
+          const article=dataOf(card);
+          return [article, ...(Array.isArray(article.related) ? article.related : [])];
+        })
+      }));
       const date=document.getElementById('report-date').value;
       if(!date) { alert('보고서 날짜를 입력하세요.'); return; }
       download(makeIssueXlsx(groups,date),exportBaseName(date)+'.xlsx');
